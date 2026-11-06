@@ -12,6 +12,11 @@
 
 ### Fixed
 
+- Tool errors now reach the MCP client with their message. Since the move to
+  MCP Python SDK 2, expected failures such as "Alias not found" or "FreeCAD is
+  not reachable" were reported only as "Error executing tool <name>". Value,
+  connection, timeout and file errors now pass through; other exceptions are
+  still treated as crashes and their details stay hidden.
 - `spreadsheet_bind_property` now binds sketch dimensions using the
   `Constraints[N]` or `Constraints.Name` property path. Previously it rejected
   these paths because it checked for a property with that literal name.
