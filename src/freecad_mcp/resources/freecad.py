@@ -1115,7 +1115,11 @@ Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
                         },
                         {
                             "name": "spreadsheet_bind_property",
-                            "description": "Bind object property to spreadsheet cell",
+                            "description": (
+                                "Bind object property to spreadsheet cell; use "
+                                "Constraints[N] or Constraints.Name for sketch "
+                                "dimensions"
+                            ),
                             "key_params": [
                                 "spreadsheet_name",
                                 "alias",
@@ -1192,8 +1196,16 @@ Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
                     "tools": [
                         {
                             "name": "add_sketch_constraint",
-                            "description": "Add generic constraint (flexible API)",
-                            "key_params": ["sketch_name", "constraint_type", "params"],
+                            "description": (
+                                "Add generic constraint (flexible API); optional "
+                                "name for spreadsheet binding"
+                            ),
+                            "key_params": [
+                                "sketch_name",
+                                "constraint_type",
+                                "params",
+                                "name",
+                            ],
                         },
                         {
                             "name": "constrain_horizontal",

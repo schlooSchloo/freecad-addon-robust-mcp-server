@@ -320,6 +320,8 @@ that can drive model dimensions through expressions.
     2. Set parameter values with `spreadsheet_set_cell`
     3. Define aliases with `spreadsheet_set_alias` (e.g., "Length", "Width")
     4. Bind to object properties with `spreadsheet_bind_property`
+       (for sketch dimensions, use `Constraints[N]` or `Constraints.Name`
+       as the property, naming constraints via `add_sketch_constraint`)
     5. Now changing the spreadsheet cell updates the model automatically!
 
 ---

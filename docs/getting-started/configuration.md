@@ -10,14 +10,15 @@ your MCP client or explicitly load them into the environment before startup.
 
 ## Environment Variables
 
-| Variable              | Description                                          | Default     |
-| --------------------- | ---------------------------------------------------- | ----------- |
-| `FREECAD_MODE`        | Connection mode: `xmlrpc`, `socket`, or `embedded`   | `xmlrpc`    |
-| `FREECAD_PATH`        | Path to FreeCAD's lib directory (embedded mode only) | Auto-detect |
-| `FREECAD_SOCKET_HOST` | Socket/XML-RPC server hostname                       | `localhost` |
-| `FREECAD_SOCKET_PORT` | JSON-RPC socket server port                          | `9876`      |
-| `FREECAD_XMLRPC_PORT` | XML-RPC server port                                  | `9875`      |
-| `FREECAD_TIMEOUT_MS`  | Default execution timeout in ms (1000-600000)        | `30000`     |
+| Variable               | Description                                          | Default     |
+| ---------------------- | ---------------------------------------------------- | ----------- |
+| `FREECAD_MODE`         | Connection mode: `xmlrpc`, `socket`, or `embedded`   | `xmlrpc`    |
+| `FREECAD_PATH`         | Path to FreeCAD's lib directory (embedded mode only) | Auto-detect |
+| `FREECAD_SOCKET_HOST`  | Socket/XML-RPC server hostname                       | `localhost` |
+| `FREECAD_SOCKET_PORT`  | JSON-RPC socket server port                          | `9876`      |
+| `FREECAD_XMLRPC_PORT`  | XML-RPC server port                                  | `9875`      |
+| `FREECAD_TIMEOUT_MS`   | Default execution timeout in ms (1000-600000)        | `30000`     |
+| `FREECAD_LAZY_CONNECT` | Start without FreeCAD; connect on first tool call    | `false`     |
 
 
 ## Data and network connections

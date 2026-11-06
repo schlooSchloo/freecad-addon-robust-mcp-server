@@ -48,6 +48,8 @@ class ServerConfig(BaseSettings):
         http_port: Port for HTTP transport.
         http_allowed_hosts: Accepted HTTP Host header values.
         http_allowed_origins: Accepted browser Origin header values.
+        lazy_connect: Start without FreeCAD and connect on the first tool call
+            (FREECAD_LAZY_CONNECT). Off by default.
         log_level: Logging level.
     """
 
@@ -115,6 +117,17 @@ class ServerConfig(BaseSettings):
         ],
         description="Allowed browser Origin header values",
     )
+
+    # Connection behaviour
+    lazy_connect: Annotated[
+        bool,
+        Field(
+            description=(
+                "Start even if FreeCAD is not running, and connect on the "
+                "first tool call instead of exiting at startup"
+            )
+        ),
+    ] = False
 
     # Logging
     log_level: str = "INFO"

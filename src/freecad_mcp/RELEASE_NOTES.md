@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- `FREECAD_LAZY_CONNECT` setting. When enabled, the server starts even if
+  FreeCAD is not running and connects on the first tool call, retrying on
+  each call until FreeCAD is reachable. Off by default.
+- Optional `name` parameter for `add_sketch_constraint`, so a dimension can be
+  bound to a spreadsheet by name.
+
+### Fixed
+
+- `spreadsheet_bind_property` now binds sketch dimensions using the
+  `Constraints[N]` or `Constraints.Name` property path. Previously it rejected
+  these paths because it checked for a property with that literal name.
+
 ## Version 0.7.0 (2026-11-06)
 
 This release updates both the MCP server and the Robust MCP Bridge. Install

@@ -7,8 +7,26 @@ Based on learnings from contextform/freecad-mcp which has the most
 comprehensive PartDesign coverage.
 """
 
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
+
+_CONSTRAINT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _is_valid_constraint_name(name: str) -> bool:
+    """Return whether a name can be used in a sketch constraint expression path.
+
+    Expression paths such as ``Sketch.Constraints.Width`` only resolve names
+    made of letters, digits and underscores that do not start with a digit.
+
+    Args:
+        name: Proposed constraint name.
+
+    Returns:
+        True if the name is usable in an expression path.
+    """
+    return _CONSTRAINT_NAME_PATTERN.fullmatch(name) is not None
 
 
 def register_partdesign_tools(
@@ -2408,11 +2426,16 @@ except Exception:
         point2: int = -1,
         value: float | None = None,
         doc_name: str | None = None,
+        name: str | None = None,
     ) -> dict[str, Any]:
         """Add a constraint to a sketch.
 
         This is a general-purpose constraint tool. For common constraints,
         use the specific constraint tools (constrain_horizontal, etc.).
+
+        Naming a dimensional constraint lets it be bound to a spreadsheet by
+        name (``spreadsheet_bind_property(..., "Constraints.<name>")``), which
+        keeps working when other constraints are added or deleted.
 
         Args:
             sketch_name: Name of the sketch.
@@ -2428,12 +2451,25 @@ except Exception:
             point2: Point index on second geometry.
             value: Value for dimensional constraints (distance, angle, etc.).
             doc_name: Document containing the sketch. Uses active document if None.
+            name: Optional constraint name (letters, digits and underscores,
+                not starting with a digit). Must be unique within the sketch.
 
         Returns:
             Dictionary with constraint info:
                 - constraint_index: Index of the added constraint
                 - constraint_count: Total constraint count
+                - name: The constraint name, or None if unnamed
+
+        Raises:
+            ValueError: If the name is invalid or already used in the sketch.
         """
+        if name is not None and not _is_valid_constraint_name(name):
+            msg = (
+                f"Invalid constraint name {name!r}: use letters, digits and "
+                "underscores, not starting with a digit"
+            )
+            raise ValueError(msg)
+
         bridge = await get_bridge()
 
         code = f"""
@@ -2491,13 +2527,24 @@ try:
     else:
         raise ValueError(f"Unknown constraint type: {{ctype}}")
 
+    constraint_name = {name!r}
+    if constraint_name is not None and constraint_name in [
+        c.Name for c in sketch.Constraints
+    ]:
+        raise ValueError(
+            f"Constraint name already used in {{sketch.Name!r}}: {{constraint_name!r}}"
+        )
+
     idx = sketch.addConstraint(constraint)
+    if constraint_name is not None:
+        sketch.renameConstraint(idx, constraint_name)
     doc.recompute()
     doc.commitTransaction()
 
     _result_ = {{
         "constraint_index": idx,
         "constraint_count": sketch.ConstraintCount,
+        "name": constraint_name,
     }}
 except Exception:
     doc.abortTransaction()

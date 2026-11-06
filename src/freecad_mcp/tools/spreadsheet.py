@@ -504,6 +504,10 @@ except Exception:
             alias: Cell alias to bind (the cell must have an alias set).
             target_object: Name of the object to modify.
             target_property: Property name to bind (e.g., "Length", "Width").
+                For a sketch dimension, use "Constraints[N]" with the
+                constraint index, or "Constraints.Name" for a named
+                constraint. Only driving dimensional constraints (Distance,
+                DistanceX, DistanceY, Radius, Diameter, Angle) can be bound.
             doc_name: Document containing the objects. Uses active if None.
 
         Returns:
@@ -511,7 +515,7 @@ except Exception:
                 - success: Whether the operation succeeded
                 - expression: The expression that was set
                 - target_object: Object that was modified
-                - target_property: Property that was bound
+                - target_property: Property path that was bound
 
         Raises:
             ValueError: If no document is found.
@@ -528,6 +532,12 @@ except Exception:
                 await spreadsheet_set_alias("Params", "A1", "BoxLength")
                 await spreadsheet_bind_property("Params", "BoxLength", "Box", "Length")
                 # Now Box.Length = 50 and updates when A1 changes
+
+            Bind a sketch dimension::
+
+                await spreadsheet_bind_property(
+                    "Params", "BoxWidth", "Sketch", "Constraints.Width"
+                )
         """
         bridge = await get_bridge()
 
@@ -544,8 +554,10 @@ target = doc.getObject({target_object!r})
 if target is None:
     raise ValueError(f"Target object not found: {target_object!r}")
 
+import re
+
 alias = {alias!r}
-prop = {target_property!r}
+prop = {target_property!r}.strip()
 
 # Verify the alias exists
 try:
@@ -555,8 +567,47 @@ try:
 except Exception as e:
     raise ValueError(f"Alias not found: {{alias!r}}") from e
 
-# Verify the property exists on target
-if not hasattr(target, prop):
+# Sketch dimensions are addressed by an expression path rather than a plain
+# property name: "Constraints[3]" (by index) or "Constraints.Width" (by name).
+constraint_match = re.fullmatch(
+    r"\\.?Constraints(?:\\[(\\d+)\\]|\\.([A-Za-z_][A-Za-z0-9_]*))", prop
+)
+if constraint_match:
+    if not hasattr(target, "Constraints") or not hasattr(target, "renameConstraint"):
+        raise ValueError(f"Target is not a sketch: {{target.Name!r}}")
+    constraints = target.Constraints
+    index_text, constraint_name = constraint_match.groups()
+    if index_text is not None:
+        index = int(index_text)
+        if index >= len(constraints):
+            raise ValueError(
+                f"Constraint index {{index}} is out of range: "
+                f"{{target.Name!r}} has {{len(constraints)}} constraints"
+            )
+        prop = f"Constraints[{{index}}]"
+    else:
+        names = [c.Name for c in constraints]
+        if constraint_name not in names:
+            raise ValueError(
+                f"No constraint named {{constraint_name!r}} in {{target.Name!r}}"
+            )
+        index = names.index(constraint_name)
+        prop = f"Constraints.{{constraint_name}}"
+    constraint = constraints[index]
+    if constraint.Type not in (
+        "Distance", "DistanceX", "DistanceY", "Radius", "Diameter", "Angle"
+    ):
+        raise ValueError(
+            f"Constraint {{index}} is a {{constraint.Type}} constraint; only "
+            "dimensional constraints can be bound to a spreadsheet"
+        )
+    if not getattr(constraint, "Driving", True):
+        raise ValueError(
+            f"Constraint {{index}} is a reference (driven) constraint and "
+            "cannot be bound to a spreadsheet"
+        )
+elif not hasattr(target, prop):
+    # Verify the property exists on target
     raise ValueError(f"Property not found on target: {{prop!r}}")
 
 # Wrap in transaction for undo support

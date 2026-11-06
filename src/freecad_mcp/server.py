@@ -32,6 +32,7 @@ Example:
 """
 
 import argparse
+import asyncio
 import logging
 import os
 import secrets
@@ -63,6 +64,45 @@ INSTANCE_ID: str = str(uuid.uuid4())
 # Global bridge instance (initialized on startup via lifespan)
 _bridge: Any = None
 
+# True when lazy_connect let the server start before FreeCAD was reachable.
+# get_bridge() then connects the bridge on the next tool call.
+_bridge_pending_connect: bool = False
+_connect_lock: asyncio.Lock | None = None
+
+
+def _get_connect_lock() -> asyncio.Lock:
+    """Return the lock that serialises on-demand bridge connections.
+
+    Returns:
+        The lock, created on first use inside the running event loop.
+    """
+    global _connect_lock
+    if _connect_lock is None:
+        _connect_lock = asyncio.Lock()
+    return _connect_lock
+
+
+async def _connect_bridge() -> None:
+    """Connect the global bridge and log the FreeCAD version.
+
+    Raises:
+        ConnectionError: If FreeCAD cannot be reached.
+    """
+    global _bridge_pending_connect
+    await _bridge.connect()
+    _bridge_pending_connect = False
+    logger.info("FreeCAD bridge connected")
+
+    try:
+        version = await _bridge.get_freecad_version()
+        logger.info(
+            "FreeCAD %s (GUI: %s)",
+            version.get("version", "unknown"),
+            "available" if version.get("gui_available") else "headless",
+        )
+    except Exception as e:
+        logger.warning("Could not get FreeCAD version: %s", e)
+
 
 def get_instance_id() -> str:
     """Get the unique instance ID for this Robust MCP Server process.
@@ -76,15 +116,33 @@ def get_instance_id() -> str:
 async def get_bridge() -> "FreecadBridge":
     """Get the active FreeCAD bridge.
 
+    If the server started with lazy_connect and FreeCAD was not reachable,
+    this connects the bridge first. A failed attempt is not cached, so the
+    next tool call tries again.
+
     Returns:
         The active FreecadBridge instance.
 
     Raises:
         RuntimeError: If bridge is not initialized.
+        ConnectionError: If the bridge is not connected and FreeCAD cannot
+            be reached.
     """
     if _bridge is None:
         msg = "FreeCAD bridge not initialized"
         raise RuntimeError(msg)
+    if _bridge_pending_connect:
+        async with _get_connect_lock():
+            if _bridge_pending_connect:
+                try:
+                    await _connect_bridge()
+                except ConnectionError as e:
+                    msg = (
+                        "FreeCAD is not reachable. Open FreeCAD and start the "
+                        "Robust MCP Bridge (or enable its auto-start), then "
+                        f"try again. Details: {e}"
+                    )
+                    raise ConnectionError(msg) from e
     return _bridge
 
 
@@ -132,7 +190,7 @@ async def lifespan(_server: MCPServer[Any]) -> AsyncIterator[None]:
     Yields:
         None - the bridge is stored in the global _bridge variable.
     """
-    global _bridge
+    global _bridge, _bridge_pending_connect
     config = get_config()
 
     logger.info("Initializing FreeCAD bridge...")
@@ -176,19 +234,18 @@ async def lifespan(_server: MCPServer[Any]) -> AsyncIterator[None]:
             "Using socket bridge: %s:%d", config.socket_host, config.socket_port
         )
 
-    await _bridge.connect()
-    logger.info("FreeCAD bridge connected")
-
-    # Log FreeCAD version
+    _bridge_pending_connect = False
     try:
-        version = await _bridge.get_freecad_version()
-        logger.info(
-            "FreeCAD %s (GUI: %s)",
-            version.get("version", "unknown"),
-            "available" if version.get("gui_available") else "headless",
+        await _connect_bridge()
+    except ConnectionError as e:
+        if not config.lazy_connect:
+            raise
+        _bridge_pending_connect = True
+        logger.warning(
+            "FreeCAD is not reachable yet; the server will connect on the "
+            "first tool call. Details: %s",
+            e,
         )
-    except Exception as e:
-        logger.warning("Could not get FreeCAD version: %s", e)
 
     try:
         yield
@@ -196,8 +253,10 @@ async def lifespan(_server: MCPServer[Any]) -> AsyncIterator[None]:
         # Shutdown
         if _bridge:
             logger.info("Disconnecting FreeCAD bridge...")
-            await _bridge.disconnect()
+            if not _bridge_pending_connect:
+                await _bridge.disconnect()
             _bridge = None
+            _bridge_pending_connect = False
 
 
 # Create the Robust MCP Server instance with lifespan
