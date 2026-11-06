@@ -19,6 +19,7 @@ Tools are organized by category:
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from freecad_mcp.tools._registration import ErrorReportingMCP
 from freecad_mcp.tools.cam import register_cam_tools
 from freecad_mcp.tools.documents import register_document_tools
 from freecad_mcp.tools.draft import register_draft_tools
@@ -60,6 +61,9 @@ def register_all_tools(
         get_bridge_func: Async function returning the active bridge connection.
         allow_unsafe_code: Whether to expose tools that execute arbitrary code.
     """
+    # Let expected errors (ValueError, ConnectionError, ...) reach the client
+    # with their message instead of the SDK's generic "Error executing tool".
+    mcp = ErrorReportingMCP(mcp)
     register_execution_tools(mcp, get_bridge_func, allow_unsafe_code=allow_unsafe_code)
     register_document_tools(mcp, get_bridge_func)
     register_object_tools(mcp, get_bridge_func)
