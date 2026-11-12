@@ -131,42 +131,99 @@ same name as one of ours, upstream's version silently wins.
   if the tool rejects the sample values.
 - Results at the time of writing: 137 tools send code, all of it compiles in
   both passes. 36 tools use the bridge's higher-level methods instead (see
-  section 5).
+  section 4).
 - Compiling only catches syntax errors. Undefined names at run time are not
-  caught (see section 6).
+  caught (see section 5).
 
 ---
 
-## 3. Backlog: bugs
+## 3. Backlog
 
-| Bug                                                           | Notes                                                                                                                                                                                                                                                                                                                            | Status             |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| **Zoom tools need `pivy` and ignore `doc_name`.**             | `pivy` isn't available in a standard FreeCAD install, so the zoom tools fail. They also act on the active view regardless of the `doc_name` passed.                                                                                                                                                                              | Backlog, Upstream? |
-| **`spreadsheet_set_cell` reports failure when it succeeded.** | Setting a value with units, e.g. `=40mm`, sets the cell correctly but returns a failure. A false failure could make the AI retry and apply a change twice.                                                                                                                                                                       | Backlog, Upstream? |
-| **`uv.lock` points at a private package mirror.**             | Every package in the lockfile resolves from `pkgs.safetycli.com` (upstream's Safety mirror), so `uv sync` may fail for anyone without access to it. Workaround: install into a fresh environment from public PyPI. Regenerating the lockfile on `custom` would conflict with every upstream merge, so raise it upstream instead. | Backlog, Upstream? |
-| **Generated code compares strings with `is`.**                | 102 tools build lines like `'MyDoc' is None` when given a document name. Python warns about this but gives the right answer, so it is untidy, not broken. Fix by deciding in the tool which document expression to send, instead of sending the comparison.                                                                      | Backlog, Upstream? |
+### 3.1 How items are prioritised
 
----
+| Priority | Meaning                                                                                                                                               |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1       | Gives a wrong or silent result (the AI thinks something worked when it didn't), or blocks common work unless unsafe Python is switched on. Fix first. |
+| P2       | Saves many calls or a lot of time, or is needed for current modelling work.                                                                           |
+| P3       | Minor, cosmetic, or documentation only.                                                                                                               |
 
-## 4. Backlog: features
+- Bugs in upstream's tools are fixed in place, and are candidates to offer
+  upstream. New capabilities go in `tools/custom/`.
+- Sources: our own sessions so far, and usage feedback from a C13 chest
+  modelling session (Nov 2026).
 
-Found while working on PartDesign models with master sketches, SubShapeBinders
-and spreadsheet-driven dimensions.
+### 3.2 Decision: read-only geometry tools instead of Python
 
-### 4.1 PartDesign gaps
+The feedback's main blocker was having no way to run Python, mostly to read
+geometry. The workaround was putting formulas in a temporary spreadsheet,
+which worked but was slow.
 
-| Feature                                                | Why                                                                                                                                                                                                                                              | Status                 |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
-| **Datum planes attached to edges and vertices.**       | `create_datum_plane` can only offset from XY, XZ or YZ. Needs attachment modes such as normal-to-edge and attachment offsets with rotation, e.g. angled planes along a curved path.                                                              | Backlog                |
-| **Sweep and pipe orientation modes.**                  | `sweep_sketch` and `subtractive_pipe` take one profile and one path. Need the orientation mode (Frenet, Binormal, auxiliary spine) and extra cross-sections for variable-section sweeps.                                                         | Backlog                |
-| **ShapeBinder and SubShapeBinder.**                    | Needed for master-sketch setups and for using another body's geometry.                                                                                                                                                                           | Backlog                |
-| **Projecting edges and faces from another body.**      | `add_external_geometry` works within a body, but a sketch linked straight into a different body hits FreeCAD's "out of allowed scope" error. The usual fix is a SubShapeBinder first, then project from that, so this depends on the item above. | Backlog                |
-| **Create `App::Link` objects.**                        | No tool creates links. They currently have to be made by hand in FreeCAD (Make Link), then pointed at the right target.                                                                                                                          | Backlog                |
-| **MultiTransform.**                                    | Not covered.                                                                                                                                                                                                                                     | Backlog                |
-| **PartDesign primitives and PartDesign helix.**        | Additive and subtractive box, cylinder and so on. A Part-workbench helix exists, but not the PartDesign feature.                                                                                                                                 | Backlog                |
-| **Check `create_sketch` can attach to a datum plane.** | Not yet tested. May only need a fix to the attachment code.                                                                                                                                                                                      | Backlog (verify first) |
+The unsafe tools (`execute_python` and friends) stay off by default. Instead,
+each gap gets a specific read-only tool:
 
-### 4.2 Clash sweep tool
+- **A "read-only Python" mode can't be enforced.** Any script can call
+  something that changes the document, so it would only be read-only by
+  convention.
+- **Specific tools keep the tree tidy.** Read-only tools work on in-memory
+  copies of shapes and never add objects to the document.
+- **They can be approved automatically.** Read-only tools are marked as such,
+  so a client can allow them without asking every time. Python always needs
+  checking.
+- **Results come back structured**, not as text to parse.
+
+### 3.3 Next up
+
+1. Geometry query tool (`get_shape_geometry`, 3.5).
+2. `create_sketch` plane lookup (3.4).
+3. Report FreeCAD's own error text from `recompute` and `validate_object` (3.4).
+4. `edit_object` link properties and unknown names (3.4).
+5. `delete_object` leaving a body with no Tip (3.4).
+6. Screenshots returned as images, with an option to keep the current view (3.4).
+7. Overlap check (`check_overlap`, 3.5), then the clash sweep that builds on it.
+8. Sketch editing and closed polylines (3.5).
+
+### 3.4 Bugs in existing tools
+
+| Priority | Bug                                                                   | Cause and fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Status             |
+| -------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| P1       | **`create_sketch` quietly makes an unattached sketch.**               | It looks the plane up by exact name (`XZ_Plane`) in the body's origin. Bodies whose origin planes are numbered (`XZ_Plane001`) get nothing, and any other plane name (a datum plane, say) is ignored without an error. Fix: find the body's origin plane by its role instead of its name, accept any plane or datum plane by name, and raise an error if nothing matches. This also covers the earlier "can `create_sketch` attach to a datum plane?" item: as written, it can't. | Backlog, Upstream? |
+| P1       | **`edit_object` can't set link properties, and skips unknown names.** | Values are set exactly as given, so link properties (`Tip`, attachment, `UpToFace`, `Profile`) receive a string instead of an object and FreeCAD rejects them. Property names the object doesn't have are skipped silently. Fix: for link-type properties, look up object names, and accept `[object, [sub-elements]]` for face and edge links. Raise an error for unknown property names.                                                                                        | Backlog, Upstream? |
+| P1       | **`recompute` reports success on a broken feature; no error text.**   | The `recompute` tool always returns success. `validate_object` checks FreeCAD's error flags and shape validity, but never reads FreeCAD's own error message for the object (`getStatusString()`), so a broken pocket shows "Invalid" with no reason. Fix: have `recompute`, `recompute_document` and `validate_object` list objects in error together with FreeCAD's message.                                                                                                     | Backlog, Upstream? |
+| P1       | **Deleting a body's last feature leaves the body with no shape.**     | `delete_object` removes the object and nothing else. If it was the body's Tip, the Tip is left empty. Fix: move the Tip back to the previous feature, as the FreeCAD GUI does, and say so in the result.                                                                                                                                                                                                                                                                          | Backlog, Upstream? |
+| P1       | **Small screenshots come back as unreadable text.**                   | `get_screenshot` returns the image as base64 text inside its result, so the client shows it as text. Large ones only work because the client saves long results to a file. Fix: return it as MCP image content, which clients display.                                                                                                                                                                                                                                            | Backlog, Upstream? |
+| P2       | **`get_screenshot` always resets the view.**                          | Every capture applies an angle (default isometric) and zooms to fit, then puts the camera back. There's no way to capture the current view or a zoomed-in region. Fix: add a "current view" option and make fit-all optional. Zooming to a region depends on the camera fix below.                                                                                                                                                                                                | Backlog, Upstream? |
+| P2       | **`set_camera_position` and the zoom tools fail.**                    | They use the 3D scene library (`pivy`), which a standard FreeCAD install doesn't make available here, hence "No SWIG wrapped library loaded". The zoom tools also act on the active view whatever `doc_name` says. Fix: use the view's own camera and zoom functions, which don't need `pivy` (check they exist in FreeCAD 1.0 and 1.1). Same cause as the earlier zoom bug, now merged into this row.                                                                            | Backlog, Upstream? |
+| P2       | **`inspect_object` has no bounding box or centre of mass.**           | It reports volume and area only. Fix: add bounding box, centre of mass and global placement. Small change to an upstream tool.                                                                                                                                                                                                                                                                                                                                                    | Backlog, Upstream? |
+| P2       | **`slice_shape` and `section_shape` only report counts.**             | They add a new object to the tree on every call and return how many pieces it has, not the outline. Fix: covered by the read-only `get_section_outline` tool (3.5), which leaves the tree alone. Optionally offer upstream a change to return the outline too.                                                                                                                                                                                                                    | Backlog            |
+| P2       | **`spreadsheet_set_cell` reports failure when it succeeded.**         | Setting a value with units, e.g. `=40mm`, sets the cell correctly but returns a failure. A false failure could make the AI retry and apply a change twice.                                                                                                                                                                                                                                                                                                                        | Backlog, Upstream? |
+| P2       | **`uv.lock` points at a private package mirror.**                     | Every package in the lockfile resolves from `pkgs.safetycli.com` (upstream's Safety mirror), so `uv sync` may fail for anyone without access to it. This blocks running the tests locally the standard way. Workaround: install into a fresh environment from public PyPI. Regenerating the lockfile on `custom` would conflict with every upstream merge, so raise it upstream instead.                                                                                          | Backlog, Upstream? |
+| P3       | **The undo history is hard to read.**                                 | Edits made through the bridge get generic undo names ("Create Object", "Edit Object", "Delete Object"), and spreadsheet edits share the document's single undo history. The feedback saw every entry labelled "Delete Object"; not reproduced yet. Fix: name each undo step after what changed (e.g. "Edit Pocket.TaperAngle"), and check what was reported.                                                                                                                      | Backlog            |
+| P3       | **Spreadsheet expressions with string literals break.**               | FreeCAD expressions quote text with `<<` and `>>`, not quote marks, so `";"` breaks the expression. Fix: say so in the spreadsheet tool descriptions.                                                                                                                                                                                                                                                                                                                             | Backlog, Upstream? |
+| P3       | **Rotation convention isn't stated.**                                 | `set_placement` and `rotate_object` take `[yaw, pitch, roll]` in degrees but don't say which axes or in what order. Fix: check against FreeCAD's rotation and state it in the descriptions.                                                                                                                                                                                                                                                                                       | Backlog, Upstream? |
+| P3       | **Generated code compares strings with `is`.**                        | 102 tools build lines like `'MyDoc' is None` when given a document name. Python warns about this but gives the right answer, so it is untidy, not broken. Fix by deciding in the tool which document expression to send, instead of sending the comparison.                                                                                                                                                                                                                       | Backlog, Upstream? |
+
+### 3.5 New tools (in `tools/custom/`)
+
+All read-only unless stated: they work on in-memory shape copies and never
+add objects to the document.
+
+| Priority | Tool                                               | What it does                                                                                                                                                                                                                                                                                                                                                                                                                | Status  |
+| -------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| P1       | **`get_shape_geometry`** (working name)            | Returns an object's vertices (positions), edges (type, curve details such as radius and centre, end points, length, optional sample points) and faces (type, area, centre, normal, bounding box). Can be limited to listed sub-elements (`Edge3`, `Face2`) and reported in another object's local frame, such as a sketch's or body's. Caps the number of items so replies stay small. Replaces the spreadsheet workaround. | Backlog |
+| P2       | **`check_overlap`**                                | Checks two objects for overlap: shared volume and where the contact is (centre and bounding box), or the minimum gap and closest points when they don't touch. For questions like "does this cut hit the support?". The clash sweep (3.6) builds on it.                                                                                                                                                                     | Backlog |
+| P2       | **Sketch editing tools** (not read-only)           | Move or edit existing sketch geometry with the solver, keeping constraints (e.g. move a line's end point). Plus a closed polyline helper that adds connected lines with coincident corners in one call, optionally making axis-aligned lines horizontal or vertical. Saves the delete-and-redraw cycles from the feedback.                                                                                                  | Backlog |
+| P2       | **`get_section_outline`**                          | Cross-section of a shape through a plane (or several parallel offsets), returning the outline geometry in the same format as `get_shape_geometry`. Replaces `slice_shape`/`section_shape` for inspection, without adding objects to the tree.                                                                                                                                                                               | Backlog |
+| P2       | **Clash sweep**                                    | Rotate one part around a pivot and report where it starts to hit another. Design in 3.6.                                                                                                                                                                                                                                                                                                                                    | Backlog |
+| P2       | **ShapeBinder and SubShapeBinder** (not read-only) | Needed for master-sketch setups and for using another body's geometry.                                                                                                                                                                                                                                                                                                                                                      | Backlog |
+| P2       | **Projecting edges and faces from another body**   | `add_external_geometry` works within a body, but a sketch linked straight into a different body hits FreeCAD's "out of allowed scope" error. The usual fix is a SubShapeBinder first, then project from that, so this depends on the item above. Needed for aligning the C13 chest and pelvis cut-outs to the new waist.                                                                                                    | Backlog |
+| P2       | **Datum planes attached to edges and vertices**    | `create_datum_plane` can only offset from XY, XZ or YZ. Needs attachment modes such as normal-to-edge and attachment offsets with rotation, e.g. angled planes along a curved path.                                                                                                                                                                                                                                         | Backlog |
+| P2       | **Volume before and after for more features**      | `pocket_sketch` reporting volume before and after was the most useful single feature in the feedback, catching a cut into the ball support. Do the same for pad, groove, subtractive loft and pipe, fillet and chamfer. Small change to upstream tools, so a good one to offer upstream.                                                                                                                                    | Backlog |
+| P3       | **Sweep and pipe orientation modes**               | `sweep_sketch` and `subtractive_pipe` take one profile and one path. Need the orientation mode (Frenet, Binormal, auxiliary spine) and extra cross-sections for variable-section sweeps.                                                                                                                                                                                                                                    | Backlog |
+| P3       | **Create `App::Link` objects**                     | No tool creates links. They currently have to be made by hand in FreeCAD (Make Link), then pointed at the right target.                                                                                                                                                                                                                                                                                                     | Backlog |
+| P3       | **MultiTransform**                                 | Not covered.                                                                                                                                                                                                                                                                                                                                                                                                                | Backlog |
+| P3       | **PartDesign primitives and PartDesign helix**     | Additive and subtractive box, cylinder and so on. A Part-workbench helix exists, but not the PartDesign feature.                                                                                                                                                                                                                                                                                                            | Backlog |
+
+### 3.6 Clash sweep design
 
 A tool that rotates one solid around a pivot and reports when it starts to
 overlap another. Prototyped with `execute_python` as a dry run. Design notes
@@ -188,10 +245,19 @@ from that:
   (e.g. from a spherical face), so pivots don't have to be entered by hand.
 - **Caveat to document:** rigid geometry only. Print tolerances and joint
   friction aren't modelled.
+- **Shares code with `check_overlap`,** so build that first.
+
+### 3.7 What worked well (keep)
+
+From the same feedback, so these don't get lost in later changes:
+
+- `pocket_sketch` reporting volume before and after.
+- `validate_object` and `undo`.
+- Rotation as yaw, pitch and roll (once the convention is documented).
 
 ---
 
-## 5. Backlog: testing
+## 4. Backlog: testing
 
 Integration tests that call the actual MCP tool functions against a real
 FreeCAD, as of Nov 2026:
@@ -224,7 +290,7 @@ straight to the bridge, so they test the bridge and FreeCAD, not the tools.
 
 ---
 
-## 6. Ideas: later
+## 5. Ideas: later
 
 - **Toolsets.** Let groups of tools be switched on or off, e.g.
   `FREECAD_TOOLSETS=partdesign,spreadsheet,documents,view`. All 170 default
@@ -256,7 +322,7 @@ straight to the bridge, so they test the bridge and FreeCAD, not the tools.
 
 ---
 
-## 7. Housekeeping
+## 6. Housekeeping
 
 - [ ] Decide which "Upstream?" items to offer to spkane as PRs, and which to
       raise as issues only.
