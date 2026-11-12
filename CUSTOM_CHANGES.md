@@ -32,11 +32,14 @@ this file is also the bug and feature tracker.
 
 ## 1. Merged into `custom`
 
-| Change                                                                                                                                                                                                                                                                                     | Files                                            | Status          |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ | --------------- |
-| **Bind sketch dimensions to spreadsheet cells.** `spreadsheet_bind_property` accepts `Constraints[N]` and `Constraints.<Name>` paths, and `add_sketch_constraint` takes an optional `name` so a dimension can be bound by name. Named bindings survive constraints being added or deleted. | `tools/partdesign.py`, `tools/spreadsheet.py`    | Done, Upstream? |
-| **Lazy connect (`FREECAD_LAZY_CONNECT`).** The server starts without FreeCAD running and connects on the first tool call instead of exiting.                                                                                                                                               | `server.py`, `config.py`, `resources/freecad.py` | Done, Upstream? |
-| **Show expected tool errors to the client.** `ValueError`, `ConnectionError`, `TimeoutError` and file errors reach the client with their real message instead of the MCP SDK's generic "Error executing tool". Messages are capped at 4,000 characters.                                    | `tools/_registration.py`, `tools/__init__.py`    | Done, Upstream? |
+| Change                                                                                                                                                                                                                                                                                                             | Files                                                | Status          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- | --------------- |
+| **Bind sketch dimensions to spreadsheet cells.** `spreadsheet_bind_property` accepts `Constraints[N]` and `Constraints.<Name>` paths, and `add_sketch_constraint` takes an optional `name` so a dimension can be bound by name. Named bindings survive constraints being added or deleted.                         | `tools/partdesign.py`, `tools/spreadsheet.py`        | Done, Upstream? |
+| **Lazy connect (`FREECAD_LAZY_CONNECT`).** The server starts without FreeCAD running and connects on the first tool call instead of exiting.                                                                                                                                                                       | `server.py`, `config.py`, `resources/freecad.py`     | Done, Upstream? |
+| **Show expected tool errors to the client.** `ValueError`, `ConnectionError`, `TimeoutError` and file errors reach the client with their real message instead of the MCP SDK's generic "Error executing tool". Messages are capped at 4,000 characters.                                                            | `tools/_registration.py`, `tools/__init__.py`        | Done, Upstream? |
+| **Safe tool module registration.** Each tool module is imported and registered on its own. A module that fails to import or register is skipped and logged, and adds none of its tools, while the rest of the server starts. Duplicate tool names are logged as errors instead of being dropped silently. See 2.2. | `tools/__init__.py`, `tools/custom/loader.py`        | Done            |
+| **`tools/custom/` package and `get_tool_registration_status`.** Home for our own tools, registered after upstream's. The first tool reports which modules loaded, which were skipped and why, and any name clashes. See 2.1.                                                                                       | `tools/custom/__init__.py`, `tools/custom/status.py` | Done            |
+| **Tool-name collision test and generated-code compile test.** See 2.3 and 2.4.                                                                                                                                                                                                                                     | `tests/unit/custom/`                                 | Done            |
 
 ### Known merge friction
 
@@ -54,17 +57,16 @@ both sides had changed them.
 
 ---
 
-## 2. Proposed: structure and safety net
+## 2. Structure and safety net
 
-These come first, before new tools are added.
-
-### 2.1 `tools/custom/` package for our own tools (Proposed)
+### 2.1 `tools/custom/` package for our own tools (Done, FreeCAD side still to come)
 
 - New tools live in `src/freecad_mcp/tools/custom/`, split into modules by
   topic (e.g. `binders.py`, `datums.py`, `clash.py`), not one large file.
-- A single `register_custom_tools(mcp, get_bridge)` entry point, hooked into
-  `register_all_tools` with one line. That line is the only edit to upstream's
-  registration code.
+- Each module is listed in `CUSTOM_TOOL_MODULES` in
+  `tools/custom/__init__.py`. `tools/__init__.py` registers those after
+  upstream's `TOOL_MODULES`, so upstream keeps its name in any clash. That
+  one line is our only hook into upstream's registration code.
 - Follow the CAM pattern rather than code-in-strings: thin MCP tool functions
   that pass JSON arguments to real Python functions running inside FreeCAD.
   That code can then be linted, type-checked and tested like any other module.
@@ -72,51 +74,66 @@ These come first, before new tools are added.
   so they can't clash with upstream helpers such as
   `_robust_mcp_cam_dispatch`.
 - Tests go in `tests/unit/custom/` and `tests/integration/custom/`.
-- Decided: the FreeCAD-side code ships inside the workbench addon, like
+- The FreeCAD-side code ships inside the workbench addon, like
   `cam_runtime.py`, in its own module (e.g.
-  `freecad/RobustMCPBridge/freecad_mcp_bridge/custom/`). This adds a second
-  place we touch upstream's layout, so keep the hook into the bridge to a
-  single line there too.
+  `freecad/RobustMCPBridge/freecad_mcp_bridge/custom/`). Keep the hook into
+  the bridge to a single line there too. Not created yet: the first custom
+  tool that needs FreeCAD-side code will add it.
 - Use a versioned dispatcher like CAM's (`CAM_API_VERSION`), so a server
   newer than the installed workbench gives a clear "update the workbench"
   error instead of a confusing failure. Changing this code means
   reinstalling the workbench and restarting FreeCAD.
+- Custom tools are documented in their docstrings and in this file. We don't
+  add them to upstream's tool lists (`freecad://capabilities`,
+  `prompts/freecad.py`, `docs/guide/tools.md`), to avoid merge conflicts. The
+  client still sees them in the normal tool list.
 
-### 2.2 Safe module registration (Proposed)
+### 2.2 Safe module registration (Done)
 
-At the moment, a Python error in any tool module (syntax error, bad import, or
-an exception during registration) stops the whole server from starting.
-Instead:
+Before this, a Python error in any tool module (syntax error, bad import, or
+an exception during registration) stopped the whole server from starting.
 
-- Register each module inside its own `try`/`except`, log the failure clearly,
-  and carry on with the rest.
-- Report skipped modules somewhere visible, e.g. in `get_connection_status` or
-  a startup log line, so a missing toolset is never silent.
+- `tools/custom/loader.py` imports and registers each module on its own. Each
+  module's tools are collected first and only added once the whole module has
+  registered, so a module that fails part-way adds nothing.
+- Failures are logged with a full traceback, and recorded in a report that the
+  `get_tool_registration_status` tool returns.
+- A single tool the server rejects (e.g. a bad signature) is skipped without
+  losing the rest of its module.
+- Tool modules must only call `mcp.tool()` while registering. They all do
+  today; anything else would need adding to the loader's staging stand-in.
 
-### 2.3 Tool-name collision check (Proposed)
+### 2.3 Tool-name collision check (Done)
 
 The MCP SDK (v2.3.0) keeps the first tool registered under a name and quietly
 drops any later one, logging only a warning. If upstream adds a tool with the
-same name as one of ours, upstream's version would silently win.
+same name as one of ours, upstream's version silently wins.
 
-- A unit test that registers upstream and custom tools separately and fails
-  on any shared name. The merge then fails loudly in tests and we decide
+- `tests/unit/custom/test_tool_name_collisions.py` fails on any name shared by
+  upstream and custom tools, so the merge fails loudly in tests and we decide
   whether to drop ours, rename it, or keep it.
-- At startup, `register_custom_tools` also checks names and logs an error for
-  any duplicate.
+- At startup the loader also logs a duplicate as an error and records it in
+  the registration report.
 - Similar tools under different names (e.g. upstream `create_link` alongside
   our `make_link`) can't be caught automatically. Check for them when
   reviewing each upstream merge.
 
-### 2.4 "Every tool generates valid Python" test (Proposed)
+### 2.4 "Every tool generates valid Python" test (Done)
 
-- Call every registered tool with sample arguments against a mock bridge, and
-  check that the code it sends to FreeCAD compiles (`compile(code, ...)`).
-- Catches the whole class of broken code-in-string bugs without needing
-  FreeCAD. Today only the PartDesign, CAM and object-inspection unit tests do
-  this, for a handful of tools.
-- Sample arguments come from each tool's signature, with an override table for
-  tools that need specific values.
+- `tests/unit/custom/test_generated_code_compiles.py` calls every registered
+  tool against a mock bridge and compiles each piece of code it sends to
+  FreeCAD. Each tool runs twice: required arguments only, and every argument
+  filled with booleans flipped, to reach more branches.
+- Sample arguments come from each tool's signature. `ARGUMENT_OVERRIDES` holds
+  values for tools that reject the placeholders (three today), and
+  `NO_BRIDGE_TOOLS` lists tools that never contact FreeCAD.
+- A new upstream tool is checked automatically. The test only needs editing
+  if the tool rejects the sample values.
+- Results at the time of writing: 137 tools send code, all of it compiles in
+  both passes. 36 tools use the bridge's higher-level methods instead (see
+  section 5).
+- Compiling only catches syntax errors. Undefined names at run time are not
+  caught (see section 6).
 
 ---
 
@@ -127,6 +144,7 @@ same name as one of ours, upstream's version would silently win.
 | **Zoom tools need `pivy` and ignore `doc_name`.**             | `pivy` isn't available in a standard FreeCAD install, so the zoom tools fail. They also act on the active view regardless of the `doc_name` passed.                                                                                                                                                                              | Backlog, Upstream? |
 | **`spreadsheet_set_cell` reports failure when it succeeded.** | Setting a value with units, e.g. `=40mm`, sets the cell correctly but returns a failure. A false failure could make the AI retry and apply a change twice.                                                                                                                                                                       | Backlog, Upstream? |
 | **`uv.lock` points at a private package mirror.**             | Every package in the lockfile resolves from `pkgs.safetycli.com` (upstream's Safety mirror), so `uv sync` may fail for anyone without access to it. Workaround: install into a fresh environment from public PyPI. Regenerating the lockfile on `custom` would conflict with every upstream merge, so raise it upstream instead. | Backlog, Upstream? |
+| **Generated code compares strings with `is`.**                | 102 tools build lines like `'MyDoc' is None` when given a document name. Python warns about this but gives the right answer, so it is untidy, not broken. Fix by deciding in the tool which document expression to send, instead of sending the comparison.                                                                      | Backlog, Upstream? |
 
 ---
 
@@ -190,6 +208,10 @@ FreeCAD, as of Nov 2026:
 The larger "workflow" integration tests send hand-written FreeCAD code
 straight to the bridge, so they test the bridge and FreeCAD, not the tools.
 
+- **Code built by the bridge's own methods (Backlog).** 36 tools call
+  higher-level bridge methods (`create_object`, `get_objects`, ...), which
+  build their FreeCAD code inside `bridge/xmlrpc.py` and `bridge/socket.py`.
+  The generated-code compile test doesn't reach that code yet.
 - **Smoke test per tool (Backlog).** Call each tool at least once against real
   FreeCAD, starting with sketch, constraints, spreadsheet binding, pad and
   pocket, and export.
@@ -224,6 +246,10 @@ straight to the bridge, so they test the bridge and FreeCAD, not the tools.
   the client's approval settings (including the unsafe Python tools) and
   loses argument checking. Only consider it as an opt-in fallback for
   clients that can't refresh their tool list.
+- **Check generated code for undefined names.** Extend the compile test with
+  a lint pass (e.g. ruff's undefined-name rule) over the generated code,
+  allowing the names FreeCAD provides (`FreeCAD`, `App`, `Part`, ...). That
+  would catch typos that compile but fail when FreeCAD runs them.
 - **Shorter tool descriptions.** Descriptions account for about half of that
   total. Moving long examples out of descriptions and into MCP prompts or
   resources would cut the per-turn cost.
