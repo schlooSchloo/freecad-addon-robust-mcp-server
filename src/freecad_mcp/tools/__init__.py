@@ -14,38 +14,48 @@ Tools are organized by category:
 - macros: Macro management tools
 - view: View and screenshot tools
 - validation: Object and document validation tools
+- custom: Tools added on the fork's ``custom`` branch (see CUSTOM_CHANGES.md)
+
+Each module is imported and registered separately, so one broken module is
+skipped and logged instead of stopping the whole server.
 """
 
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from freecad_mcp.tools._registration import ErrorReportingMCP
-from freecad_mcp.tools.cam import register_cam_tools
-from freecad_mcp.tools.documents import register_document_tools
-from freecad_mcp.tools.draft import register_draft_tools
-from freecad_mcp.tools.execution import register_execution_tools
-from freecad_mcp.tools.export import register_export_tools
-from freecad_mcp.tools.macros import register_macro_tools
-from freecad_mcp.tools.objects import register_object_tools
-from freecad_mcp.tools.partdesign import register_partdesign_tools
-from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
-from freecad_mcp.tools.validation import register_validation_tools
-from freecad_mcp.tools.view import register_view_tools
+from freecad_mcp.tools.custom import CUSTOM_TOOL_MODULES
+from freecad_mcp.tools.custom.loader import (
+    ToolModule,
+    register_tool_modules,
+    start_registration_report,
+)
 
 __all__ = [
+    "TOOL_MODULES",
     "register_all_tools",
-    "register_cam_tools",
-    "register_document_tools",
-    "register_draft_tools",
-    "register_execution_tools",
-    "register_export_tools",
-    "register_macro_tools",
-    "register_object_tools",
-    "register_partdesign_tools",
-    "register_spreadsheet_tools",
-    "register_validation_tools",
-    "register_view_tools",
 ]
+
+# Tool modules, registered in this order.
+TOOL_MODULES: tuple[ToolModule, ...] = (
+    ToolModule("execution", "freecad_mcp.tools.execution", "register_execution_tools"),
+    ToolModule("documents", "freecad_mcp.tools.documents", "register_document_tools"),
+    ToolModule("objects", "freecad_mcp.tools.objects", "register_object_tools"),
+    ToolModule(
+        "partdesign", "freecad_mcp.tools.partdesign", "register_partdesign_tools"
+    ),
+    ToolModule(
+        "spreadsheet", "freecad_mcp.tools.spreadsheet", "register_spreadsheet_tools"
+    ),
+    ToolModule("draft", "freecad_mcp.tools.draft", "register_draft_tools"),
+    ToolModule("export", "freecad_mcp.tools.export", "register_export_tools"),
+    ToolModule("cam", "freecad_mcp.tools.cam", "register_cam_tools"),
+    ToolModule("macros", "freecad_mcp.tools.macros", "register_macro_tools"),
+    ToolModule("view", "freecad_mcp.tools.view", "register_view_tools"),
+    ToolModule(
+        "validation", "freecad_mcp.tools.validation", "register_validation_tools"
+    ),
+)
 
 
 def register_all_tools(
@@ -64,14 +74,12 @@ def register_all_tools(
     # Let expected errors (ValueError, ConnectionError, ...) reach the client
     # with their message instead of the SDK's generic "Error executing tool".
     mcp = ErrorReportingMCP(mcp)
-    register_execution_tools(mcp, get_bridge_func, allow_unsafe_code=allow_unsafe_code)
-    register_document_tools(mcp, get_bridge_func)
-    register_object_tools(mcp, get_bridge_func)
-    register_partdesign_tools(mcp, get_bridge_func)
-    register_spreadsheet_tools(mcp, get_bridge_func)
-    register_draft_tools(mcp, get_bridge_func)
-    register_export_tools(mcp, get_bridge_func)
-    register_cam_tools(mcp, get_bridge_func)
-    register_macro_tools(mcp, get_bridge_func, allow_unsafe_code=allow_unsafe_code)
-    register_view_tools(mcp, get_bridge_func)
-    register_validation_tools(mcp, get_bridge_func, allow_unsafe_code=allow_unsafe_code)
+    report = start_registration_report()
+    # Custom tools go last, so an upstream tool keeps its name in any clash.
+    register_tool_modules(
+        mcp,
+        (*TOOL_MODULES, *CUSTOM_TOOL_MODULES),
+        get_bridge_func,
+        allow_unsafe_code=allow_unsafe_code,
+        report=report,
+    )
