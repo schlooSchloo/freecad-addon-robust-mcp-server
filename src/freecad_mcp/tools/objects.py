@@ -4,8 +4,60 @@ This module provides tools for managing FreeCAD objects:
 creating, editing, deleting, and inspecting objects.
 """
 
+import math
 from collections.abc import Awaitable, Callable
 from typing import Any
+
+from freecad_mcp.tools.custom.shape_snippets import OUTLINE_CODE, SHAPE_REPORT_CODE
+
+
+def _scale_factors(scale: float | list[float]) -> tuple[float, float, float]:
+    """Turn a scale argument into three positive, finite factors.
+
+    Args:
+        scale: One factor for uniform scaling or [sx, sy, sz].
+
+    Returns:
+        The factors along X, Y and Z.
+
+    Raises:
+        ValueError: If the list does not have three numbers, or a factor is
+            zero, negative or not finite.
+    """
+    if isinstance(scale, int | float):
+        factors = [float(scale)] * 3
+    else:
+        if len(scale) != 3:
+            raise ValueError("scale must be one number or a list [sx, sy, sz]")
+        factors = [float(value) for value in scale]
+    for value in factors:
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(
+                f"Scale factors must be positive numbers, got {value}. "
+                "Use mirror_object to mirror an object."
+            )
+    return factors[0], factors[1], factors[2]
+
+
+def _vector3(values: list[float], name: str) -> tuple[float, float, float]:
+    """Check that a parameter is three finite numbers and return them as floats.
+
+    Args:
+        values: The [x, y, z] list given to the tool.
+        name: Parameter name, for the error message.
+
+    Returns:
+        The three values as floats.
+
+    Raises:
+        ValueError: If there are not exactly three finite numbers.
+    """
+    if len(values) != 3:
+        raise ValueError(f"{name} must be a list of three numbers [x, y, z]")
+    x, y, z = (float(value) for value in values)
+    if not all(map(math.isfinite, (x, y, z))):
+        raise ValueError(f"{name} values must be finite numbers")
+    return x, y, z
 
 
 def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
@@ -490,6 +542,9 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
     ) -> dict[str, Any]:
         """Perform a boolean operation on two FreeCAD objects.
 
+        Creates a native boolean feature linked to the sources: it updates
+        when they change.
+
         Args:
             operation: Boolean operation type: "fuse" (union), "cut" (subtract),
                       or "common" (intersection).
@@ -503,6 +558,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: True (updates with its sources)
         """
         bridge = await get_bridge()
 
@@ -552,6 +608,7 @@ _result_ = {{
     "name": result.Name,
     "label": result.Label,
     "type_id": result.TypeId,
+    "parametric": True,
 }}
 """
         result = await bridge.execute_python(code)
@@ -568,16 +625,28 @@ _result_ = {{
     ) -> dict[str, Any]:
         """Set the placement (position and rotation) of a FreeCAD object.
 
+        Absolute: the values given replace the current position and rotation;
+        they are not added to them. The rotation turns the object about its
+        placement origin (not its centre).
+
+        Rotation convention (same as FreeCAD.Rotation(yaw, pitch, roll)):
+        yaw about Z, pitch about Y, roll about X, in degrees. Applied to the
+        object in the order roll (X), then pitch (Y), then yaw (Z), each about
+        the fixed global axes; equivalently Z, then the new Y, then the new X.
+        For example [90, 0, 0] turns +X onto +Y, and [0, 90, 0] turns +X
+        onto -Z.
+
         Args:
             object_name: Name of the object to move.
             position: Position as [x, y, z]. Keeps current if None.
-            rotation: Rotation as [yaw, pitch, roll] in degrees. Keeps current if None.
+            rotation: Rotation as [yaw, pitch, roll] in degrees (Z, Y, X; see
+                above). Keeps current if None.
             doc_name: Document containing the object. Uses active document if None.
 
         Returns:
             Dictionary with new placement:
                 - position: New position [x, y, z]
-                - rotation: New rotation angles
+                - rotation: New rotation as [yaw, pitch, roll] in degrees
         """
         bridge = await get_bridge()
 
@@ -630,33 +699,61 @@ _result_ = {{
         scale: float | list[float],
         result_name: str | None = None,
         doc_name: str | None = None,
+        parametric: bool = True,
     ) -> dict[str, Any]:
         """Scale an object uniformly or non-uniformly.
 
-        Creates a new scaled copy using Part.Scale.
+        Creates a new scaled object about the global origin (0, 0, 0); the
+        source object is left unchanged. By default this is a native
+        Part::Scale feature linked to the source, so it is parametric: it
+        updates when the source changes. With parametric=False, or if this
+        FreeCAD has no Part::Scale, it creates a static copy (Part::Feature):
+        it won't update when the source changes.
+
+        Uniform scaling keeps the geometry exact (volume = source * s^3).
+        Non-uniform scaling turns curved faces into B-spline surfaces, so
+        the volume is only close to source * sx * sy * sz.
 
         Args:
             object_name: Name of the object to scale.
             scale: Scale factor. Can be:
-                - A single float for uniform scaling
-                - A list [sx, sy, sz] for non-uniform scaling
+                - A single positive number for uniform scaling
+                - A list [sx, sy, sz] of positive numbers for non-uniform scaling
             result_name: Name for the result object. Auto-generated if None.
             doc_name: Document containing the object. Uses active document if None.
+            parametric: Create a Part::Scale linked to the source (True,
+                default) or a static copy of the scaled shape (False).
 
         Returns:
             Dictionary with result object information:
                 - name: Result object name
                 - label: Result object label
-                - type_id: Result object type
+                - type_id: Result object type (Part::Scale or Part::Feature)
+                - parametric: Whether the result updates when the source changes
+                - source: Name of the source object
+                - factors: [sx, sy, sz]
+                - uniform: Whether all factors are equal
+                - valid: Whether FreeCAD reports the result shape as valid
+                - shape_type, solid_count, closed: From the result shape
+                - volume: Result volume (None if the shape has no solids)
+                - source_volume: Source volume (None if no solids)
+                - expected_volume: source_volume * sx * sy * sz
+                - volume_error_percent: Difference from expected_volume
+                - warnings: Problems found (invalid shape, volume mismatch,
+                  changed solid count, static fallback); empty if none
+
+        Raises:
+            ValueError: If a factor is not a positive number, the object is
+                not found or has no shape, or scaling produced no shape.
         """
         bridge = await get_bridge()
 
-        if isinstance(scale, int | float):
-            scale_vec = f"FreeCAD.Vector({scale}, {scale}, {scale})"
-        else:
-            scale_vec = f"FreeCAD.Vector({scale[0]}, {scale[1]}, {scale[2]})"
+        sx, sy, sz = _scale_factors(scale)
+        uniform = sx == sy == sz
 
-        code = f"""
+        code = (
+            SHAPE_REPORT_CODE
+            + f"""
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
@@ -665,39 +762,104 @@ obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError("Object not found: " + repr({object_name!r}))
 
-if not hasattr(obj, "Shape"):
+if not hasattr(obj, "Shape") or obj.Shape.isNull():
     raise ValueError("Object has no shape to scale")
 
-import Part
+sx, sy, sz = {sx!r}, {sy!r}, {sz!r}
+uniform = {uniform!r}
+source_report = _mcp_shape_report(obj.Shape)
+native_available = "Part::Scale" in doc.supportedTypes()
+use_native = {parametric!r} and native_available
 
 # Wrap in transaction for undo support
 doc.openTransaction("Scale Object")
 try:
-    scale_vec = {scale_vec}
-    center = obj.Shape.BoundBox.Center
-
-    # Create scaled shape
-    mat = FreeCAD.Matrix()
-    mat.scale(scale_vec)
-    scaled_shape = obj.Shape.transformGeometry(mat)
-
-    # Create result object
     result_name = {result_name!r} or f"{{obj.Name}}_scaled"
-    result = doc.addObject("Part::Feature", result_name)
-    result.Shape = scaled_shape
+    if use_native:
+        result = doc.addObject("Part::Scale", result_name)
+        result.Base = obj
+        result.Uniform = uniform
+        if uniform:
+            result.UniformScale = sx
+        else:
+            result.XScale = sx
+            result.YScale = sy
+            result.ZScale = sz
+    else:
+        if uniform:
+            # Exact for every surface type.
+            scaled_shape = obj.Shape.copy()
+            scaled_shape.scale(sx)
+        else:
+            mat = FreeCAD.Matrix()
+            mat.scale(FreeCAD.Vector(sx, sy, sz))
+            scaled_shape = obj.Shape.transformGeometry(mat)
+        result = doc.addObject("Part::Feature", result_name)
+        result.Shape = scaled_shape
 
     doc.recompute()
+    if result.Shape.isNull():
+        raise ValueError(
+            "Scaling " + repr(obj.Name) + " produced no shape: "
+            + str(result.getStatusString())
+        )
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
     raise
 
+report = _mcp_shape_report(result.Shape)
+warnings = []
+if {parametric!r} and not native_available:
+    warnings.append(
+        "Part::Scale is not available in this FreeCAD version, so this is a "
+        "static snapshot: it won't update when the source changes."
+    )
+if not report["valid"]:
+    warnings.append(
+        "FreeCAD reports the scaled shape as invalid (isValid() is False). "
+        "Check it with validate_object before using it in other operations."
+    )
+if report["solid_count"] != source_report["solid_count"]:
+    warnings.append(
+        "Solid count changed from " + str(source_report["solid_count"])
+        + " to " + str(report["solid_count"]) + "."
+    )
+expected_volume = None
+volume_error_percent = None
+if source_report["volume"] is not None:
+    expected_volume = source_report["volume"] * sx * sy * sz
+    if report["volume"] is not None and expected_volume:
+        volume_error_percent = (
+            100.0 * abs(report["volume"] - expected_volume) / abs(expected_volume)
+        )
+    limit = 0.01 if uniform else 5.0
+    if volume_error_percent is None or volume_error_percent > limit:
+        warnings.append(
+            "Volume " + str(report["volume"]) + " does not match the expected "
+            + str(expected_volume) + " (source volume x " + str(sx * sy * sz) + ")."
+        )
+
 _result_ = {{
     "name": result.Name,
     "label": result.Label,
     "type_id": result.TypeId,
+    "parametric": use_native,
+    "source": obj.Name,
+    "factors": [sx, sy, sz],
+    "uniform": uniform,
+    "valid": report["valid"],
+    "shape_type": report["shape_type"],
+    "solid_count": report["solid_count"],
+    "closed": report["closed"],
+    "volume": report["volume"],
+    "source_volume": source_report["volume"],
+    "expected_volume": expected_volume,
+    "volume_error_percent": volume_error_percent,
+    "warnings": warnings,
 }}
 """
+        )
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
@@ -713,20 +875,26 @@ _result_ = {{
     ) -> dict[str, Any]:
         """Rotate an object around an axis.
 
-        Modifies the object's placement in-place.
+        Modifies the object's placement in-place. Incremental: the rotation
+        is added to the object's current rotation (calling it twice with 45
+        degrees turns the object 90 degrees), unlike set_placement, which
+        sets an absolute rotation. The angle follows the right-hand rule
+        about the axis. The position moves too, so the object turns about
+        the center point.
 
         Args:
             object_name: Name of the object to rotate.
-            axis: Rotation axis as [x, y, z] vector.
+            axis: Rotation axis as [x, y, z] vector (global coordinates).
             angle: Rotation angle in degrees.
             center: Center point for rotation [x, y, z].
-                    Uses object center if None.
+                    Uses the center of the object's bounding box if None.
             doc_name: Document containing the object. Uses active document if None.
 
         Returns:
             Dictionary with new placement:
                 - position: New position [x, y, z]
-                - rotation: New rotation angles
+                - rotation: New total rotation as [yaw, pitch, roll] in
+                  degrees (about Z, Y, X; the convention set_placement uses)
         """
         bridge = await get_bridge()
 
@@ -788,6 +956,8 @@ _result_ = {{
     ) -> dict[str, Any]:
         """Create a copy of an object.
 
+        Creates a static copy: it won't update when the source changes.
+
         Args:
             object_name: Name of the object to copy.
             new_name: Name for the copy. Auto-generated if None.
@@ -799,6 +969,7 @@ _result_ = {{
                 - name: Copy object name
                 - label: Copy object label
                 - type_id: Copy object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -847,6 +1018,7 @@ _result_ = {{
     "name": copy_obj.Name,
     "label": copy_obj.Label,
     "type_id": copy_obj.TypeId,
+    "parametric": False,
 }}
 """
         result = await bridge.execute_python(code)
@@ -863,7 +1035,8 @@ _result_ = {{
     ) -> dict[str, Any]:
         """Mirror an object across a plane.
 
-        Creates a new mirrored copy of the object.
+        Creates a new mirrored copy of the object. It is a static copy: it
+        won't update when the source changes.
 
         Args:
             object_name: Name of the object to mirror.
@@ -876,6 +1049,7 @@ _result_ = {{
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -929,6 +1103,7 @@ _result_ = {{
     "name": result.Name,
     "label": result.Label,
     "type_id": result.TypeId,
+    "parametric": False,
 }}
 """
         result = await bridge.execute_python(code)
@@ -1271,6 +1446,8 @@ except Exception:
     ) -> dict[str, Any]:
         """Create a shell (hollow) version of a solid by removing faces.
 
+        Creates a static copy: it won't update when the source changes.
+
         Also known as "thickness" operation. Removes specified faces and
         offsets the remaining faces to create a hollow shell.
 
@@ -1287,6 +1464,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -1339,6 +1517,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
     }}
 except Exception:
     doc.abortTransaction()
@@ -1358,6 +1537,8 @@ except Exception:
     ) -> dict[str, Any]:
         """Create a 3D offset of a shape.
 
+        Creates a static copy: it won't update when the source changes.
+
         Offsets all faces of the shape by the specified distance.
 
         Args:
@@ -1371,6 +1552,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -1404,6 +1586,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
     }}
 except Exception:
     doc.abortTransaction()
@@ -1421,8 +1604,14 @@ except Exception:
         plane_normal: list[float],
         result_name: str | None = None,
         doc_name: str | None = None,
+        max_edges: int = 200,
     ) -> dict[str, Any]:
         """Slice a shape with a plane, returning the cross-section.
+
+        Adds a new object holding the section wires to the document on every
+        call. It is a static copy: it won't update when the source changes.
+        The result also lists the outline geometry, so the object does not
+        need to be inspected separately.
 
         Args:
             object_name: Name of the object to slice.
@@ -1430,16 +1619,41 @@ except Exception:
             plane_normal: Normal vector of the cutting plane [x, y, z].
             result_name: Name for result object. Auto-generated if None.
             doc_name: Document containing the object. Uses active document if None.
+            max_edges: Most edges to list in the outline (default 200). The
+                counts always cover every edge; "truncated" says if some
+                were left out.
 
         Returns:
             Dictionary with result object information:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
+                - wire_count: Number of section wires
+                - edge_count: Number of section edges
+                - outline: Section geometry in global coordinates:
+                    - wires: List of wires, each with index, closed, length,
+                      edge_count and edges. Each edge has curve_type (e.g.
+                      "Line", "Circle", "ArcOfCircle", "BSplineCurve"),
+                      start, end, length and closed; circles and arcs also
+                      have center, radius and axis. Edges are in wire order;
+                      an edge's start and end follow its own direction,
+                      which may run against the wire
+                    - edges_returned, truncated: How many edges are listed
+                      and whether the max_edges limit cut the list short
         """
         bridge = await get_bridge()
 
-        code = f"""
+        if max_edges < 0:
+            raise ValueError("max_edges must be zero or more")
+        px, py, pz = _vector3(plane_point, "plane_point")
+        nx, ny, nz = _vector3(plane_normal, "plane_normal")
+        if nx == ny == nz == 0:
+            raise ValueError("plane_normal must not be zero")
+
+        code = (
+            OUTLINE_CODE
+            + f"""
 import Part
 
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
@@ -1456,8 +1670,8 @@ if not hasattr(obj, "Shape"):
 # Wrap in transaction for undo support
 doc.openTransaction("Slice Shape")
 try:
-    point = FreeCAD.Vector({plane_point[0]}, {plane_point[1]}, {plane_point[2]})
-    normal = FreeCAD.Vector({plane_normal[0]}, {plane_normal[1]}, {plane_normal[2]})
+    point = FreeCAD.Vector({px!r}, {py!r}, {pz!r})
+    normal = FreeCAD.Vector({nx!r}, {ny!r}, {nz!r})
 
     # Create section
     wires = obj.Shape.slice(normal, point.dot(normal))
@@ -1478,15 +1692,21 @@ try:
     doc.recompute()
     doc.commitTransaction()
 
+    outline = _mcp_outline(section_shape, {int(max_edges)!r})
     _result_ = {{
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
+        "wire_count": outline["wire_count"],
+        "edge_count": outline["edge_count"],
+        "outline": outline,
     }}
 except Exception:
     doc.abortTransaction()
     raise
 """
+        )
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
@@ -1499,8 +1719,13 @@ except Exception:
         offset: float = 0.0,
         result_name: str | None = None,
         doc_name: str | None = None,
+        max_edges: int = 200,
     ) -> dict[str, Any]:
         """Create a cross-section of a shape at a standard plane.
+
+        Adds a new object holding the section wires to the document on every
+        call. It is a static copy: it won't update when the source changes.
+        The result lists the outline geometry, as slice_shape does.
 
         Args:
             object_name: Name of the object to section.
@@ -1508,12 +1733,16 @@ except Exception:
             offset: Offset from origin along the plane normal. Defaults to 0.
             result_name: Name for result object. Auto-generated if None.
             doc_name: Document containing the object. Uses active document if None.
+            max_edges: Most edges to list in the outline (default 200).
 
         Returns:
             Dictionary with result object information:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
+                - wire_count, edge_count: Section counts
+                - outline: Section geometry (see slice_shape)
         """
         plane_normals = {
             "XY": [0, 0, 1],
@@ -1527,7 +1756,9 @@ except Exception:
         normal = plane_normals[plane]
         point = [n * offset for n in normal]
 
-        return await slice_shape(object_name, point, normal, result_name, doc_name)
+        return await slice_shape(
+            object_name, point, normal, result_name, doc_name, max_edges
+        )
 
     # =========================================================================
     # Part Compound Operations
@@ -1540,6 +1771,8 @@ except Exception:
         doc_name: str | None = None,
     ) -> dict[str, Any]:
         """Combine multiple shapes into a single compound.
+
+        Creates a static copy: it won't update when the source changes.
 
         A compound is a collection of shapes that can be manipulated together
         but are not fused (each shape remains separate).
@@ -1554,6 +1787,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
                 - shape_count: Number of shapes in compound
         """
         bridge = await get_bridge()
@@ -1590,6 +1824,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
         "shape_count": len(shapes),
     }}
 except Exception:
@@ -1608,6 +1843,8 @@ except Exception:
     ) -> dict[str, Any]:
         """Separate a compound into individual shape objects.
 
+        Creates static copies: they won't update when the source changes.
+
         Args:
             object_name: Name of the compound object to explode.
             doc_name: Document containing the object. Uses active document if None.
@@ -1616,6 +1853,7 @@ except Exception:
             Dictionary with result:
                 - success: Whether operation succeeded
                 - created_objects: List of created object names
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -1656,6 +1894,7 @@ try:
     _result_ = {{
         "success": True,
         "created_objects": created,
+        "parametric": False,
     }}
 except Exception:
     doc.abortTransaction()
@@ -1674,6 +1913,9 @@ except Exception:
     ) -> dict[str, Any]:
         """Fuse (union) multiple shapes into a single solid.
 
+        Creates a static copy: it won't update when the source changes.
+        Use boolean_operation for a parametric fuse.
+
         Unlike boolean_operation which works on two objects at a time,
         this fuses all specified objects at once.
 
@@ -1687,6 +1929,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -1728,6 +1971,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
     }}
 except Exception:
     doc.abortTransaction()
@@ -1746,6 +1990,9 @@ except Exception:
     ) -> dict[str, Any]:
         """Find the common (intersection) of multiple shapes.
 
+        Creates a static copy: it won't update when the source changes.
+        Use boolean_operation for a parametric common.
+
         Args:
             object_names: List of object names to intersect.
             result_name: Name for result object. Auto-generated if None.
@@ -1756,6 +2003,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -1797,6 +2045,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
     }}
 except Exception:
     doc.abortTransaction()
@@ -1892,6 +2141,8 @@ except Exception:
     ) -> dict[str, Any]:
         """Create a face from a closed wire.
 
+        Creates a static copy: it won't update when the source changes.
+
         Args:
             object_name: Name of the wire object.
             result_name: Name for result object. Auto-generated if None.
@@ -1902,6 +2153,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
                 - area: Face area
         """
         bridge = await get_bridge()
@@ -1941,6 +2193,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
         "area": face.Area,
     }}
 except Exception:
@@ -1958,24 +2211,58 @@ except Exception:
         direction: list[float],
         result_name: str | None = None,
         doc_name: str | None = None,
+        solid: bool | None = None,
     ) -> dict[str, Any]:
-        """Extrude a wire or face along a direction vector.
+        """Extrude a wire, sketch or face along a direction vector.
+
+        Creates a native Part::Extrusion linked to the source, so it is
+        parametric: it updates when the source changes.
+
+        Solid output: with solid=None (default) the result is a solid when
+        the profile is closed (every wire closed, or the profile is a face),
+        and a surface (open shell) otherwise. solid=True asks FreeCAD to make
+        faces from the closed wires first and always gives a solid, or fails
+        with a clear error for an open wire. solid=False extrudes wires as
+        surfaces (the old behaviour for closed wires); faces still give solids.
 
         Args:
-            object_name: Name of the wire or face object to extrude.
+            object_name: Name of the wire, sketch or face object to extrude.
             direction: Extrusion direction and length as [x, y, z].
             result_name: Name for result object. Auto-generated if None.
             doc_name: Document containing the object. Uses active document if None.
+            solid: Make a solid (True), a surface (False), or decide from
+                whether the profile is closed (None, default).
 
         Returns:
             Dictionary with result object information:
                 - name: Result object name
                 - label: Result object label
-                - type_id: Result object type
+                - type_id: Result object type (Part::Extrusion)
+                - parametric: True (the result updates when the source changes)
+                - source: Name of the profile object
+                - solid: Whether FreeCAD's Solid option was used
+                - profile_closed: Whether every wire of the profile is closed
+                - shape_type: Result shape type (e.g. "Solid", "Shell")
+                - closed: Whether the result is closed (watertight)
+                - solid_count: Number of solids in the result
+                - volume: Volume (None if the result has no solids)
+                - valid: Whether FreeCAD reports the shape as valid
+
+        Raises:
+            ValueError: If the direction has zero length, the object is not
+                found or has no shape, or the extrusion failed (for example
+                solid=True with an open wire).
         """
         bridge = await get_bridge()
 
-        code = f"""
+        dx, dy, dz = _vector3(direction, "direction")
+        length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if length == 0:
+            raise ValueError("direction must not be zero; it sets the length too")
+
+        code = (
+            SHAPE_REPORT_CODE
+            + f"""
 import Part
 
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
@@ -1986,31 +2273,55 @@ obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError("Object not found: " + repr({object_name!r}))
 
-if not hasattr(obj, "Shape"):
+if not hasattr(obj, "Shape") or obj.Shape.isNull():
     raise ValueError("Object has no shape")
+
+profile = obj.Shape
+wires = profile.Wires
+profile_closed = bool(profile.Faces) or (bool(wires) and all(w.isClosed() for w in wires))
+solid = {solid!r}
+if solid is None:
+    solid = profile_closed
 
 # Wrap in transaction for undo support
 doc.openTransaction("Extrude Shape")
 try:
-    direction = FreeCAD.Vector({direction[0]}, {direction[1]}, {direction[2]})
-    extruded = obj.Shape.extrude(direction)
-
     result_name = {result_name!r} or f"{{obj.Name}}_extruded"
-    result = doc.addObject("Part::Feature", result_name)
-    result.Shape = extruded
+    result = doc.addObject("Part::Extrusion", result_name)
+    result.Base = obj
+    result.DirMode = "Custom"
+    result.Dir = FreeCAD.Vector({dx!r}, {dy!r}, {dz!r}).normalize()
+    result.LengthFwd = {length!r}
+    result.Solid = solid
 
     doc.recompute()
+    if result.Shape.isNull() or "Invalid" in result.State:
+        message = str(result.getStatusString())
+        if solid and not profile_closed:
+            message += " (solid=True needs a closed profile; use solid=False for a surface)"
+        raise ValueError("Extrusion of " + repr(obj.Name) + " failed: " + message)
     doc.commitTransaction()
-
-    _result_ = {{
-        "name": result.Name,
-        "label": result.Label,
-        "type_id": result.TypeId,
-    }}
 except Exception:
     doc.abortTransaction()
     raise
+
+report = _mcp_shape_report(result.Shape)
+_result_ = {{
+    "name": result.Name,
+    "label": result.Label,
+    "type_id": result.TypeId,
+    "parametric": True,
+    "source": obj.Name,
+    "solid": bool(solid),
+    "profile_closed": profile_closed,
+    "shape_type": report["shape_type"],
+    "closed": report["closed"],
+    "solid_count": report["solid_count"],
+    "volume": report["volume"],
+    "valid": report["valid"],
+}}
 """
+        )
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
@@ -2027,6 +2338,8 @@ except Exception:
     ) -> dict[str, Any]:
         """Revolve a wire or face around an axis.
 
+        Creates a static copy: it won't update when the source changes.
+
         Args:
             object_name: Name of the wire or face object to revolve.
             axis_point: A point on the rotation axis [x, y, z].
@@ -2040,6 +2353,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -2079,6 +2393,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
     }}
 except Exception:
     doc.abortTransaction()
@@ -2104,6 +2419,8 @@ except Exception:
     ) -> dict[str, Any]:
         """Create a loft (transition shape) between multiple profiles.
 
+        Creates a static copy: it won't update when the source changes.
+
         This is the Part workbench version of loft, working directly on
         wires/faces rather than PartDesign sketches.
 
@@ -2120,6 +2437,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -2163,6 +2481,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
     }}
 except Exception:
     doc.abortTransaction()
@@ -2184,6 +2503,8 @@ except Exception:
     ) -> dict[str, Any]:
         """Sweep a profile along a spine path.
 
+        Creates a static copy: it won't update when the source changes.
+
         This is the Part workbench version of sweep, working directly on
         wires/faces rather than PartDesign sketches.
 
@@ -2200,6 +2521,7 @@ except Exception:
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - parametric: False (static copy)
         """
         bridge = await get_bridge()
 
@@ -2249,6 +2571,7 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "parametric": False,
     }}
 except Exception:
     doc.abortTransaction()

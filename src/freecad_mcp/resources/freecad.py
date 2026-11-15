@@ -780,13 +780,23 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "slice_shape",
-                            "description": "Slice object with a plane",
-                            "key_params": ["object_name", "plane"],
+                            "description": "Slice object with a plane; returns the outline",
+                            "key_params": [
+                                "object_name",
+                                "plane_point",
+                                "plane_normal",
+                                "max_edges",
+                            ],
                         },
                         {
                             "name": "section_shape",
-                            "description": "Get 2D section where plane intersects object",
-                            "key_params": ["object_name", "plane"],
+                            "description": "Get 2D section where plane intersects object; returns the outline",
+                            "key_params": [
+                                "object_name",
+                                "plane",
+                                "offset",
+                                "max_edges",
+                            ],
                         },
                         {
                             "name": "make_compound",
@@ -810,8 +820,8 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "extrude_shape",
-                            "description": "Extrude shape along vector",
-                            "key_params": ["object_name", "direction", "length"],
+                            "description": "Extrude shape along vector (parametric; solid from closed profiles)",
+                            "key_params": ["object_name", "direction", "solid"],
                         },
                         {
                             "name": "revolve_shape",
@@ -845,8 +855,8 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "scale_object",
-                            "description": "Scale an object by a factor",
-                            "key_params": ["object_name", "scale_factor"],
+                            "description": "Scale an object by a factor (parametric Part::Scale)",
+                            "key_params": ["object_name", "scale", "parametric"],
                         },
                         {
                             "name": "rotate_object",
@@ -896,7 +906,7 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "create_sketch",
-                            "description": "Create sketch on plane or face",
+                            "description": "Create sketch on an origin plane, datum plane or face",
                             "key_params": ["body_name", "plane"],
                         },
                         {
