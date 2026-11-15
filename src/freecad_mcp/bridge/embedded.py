@@ -363,6 +363,7 @@ else:
         *,
         include_properties: bool = True,
         include_shape: bool = True,
+        property_names: list[str] | None = None,
     ) -> ObjectInfo:
         """Get detailed object information."""
         result = await self.execute_python(
@@ -371,6 +372,7 @@ else:
                 doc_name,
                 include_properties=include_properties,
                 include_shape=include_shape,
+                property_names=property_names,
             )
         )
 

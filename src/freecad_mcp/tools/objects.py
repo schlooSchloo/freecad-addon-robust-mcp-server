@@ -100,6 +100,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         doc_name: str | None = None,
         include_properties: bool = True,
         include_shape: bool = True,
+        property_names: list[str] | None = None,
     ) -> dict[str, Any]:
         """Get detailed information about a FreeCAD object.
 
@@ -111,6 +112,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             doc_name: Document containing the object. Uses active document if None.
             include_properties: Whether to include property values.
             include_shape: Whether to include shape geometry details.
+            property_names: Only return these properties, e.g. ["Length",
+                "Placement"]. Use it on objects with many properties, or when
+                properties_truncated is true. Unknown names raise an error.
+                Returns all properties if None.
 
         Returns:
             Dictionary containing comprehensive object information:
@@ -118,17 +123,27 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 - label: Object label
                 - type_id: FreeCAD type identifier
                 - properties: Dictionary of property names and values (if requested)
-                - shape_info: Shape details (if requested and object has shape)
+                - properties_truncated: True if the property list was cut short
+                  (ask for specific ones with property_names)
+                - shape_info: Shape details (if requested and object has shape):
+                  bounding box, centre of mass, topology counts, placement;
+                  area, volume and bounds are null where they don't apply
+                  (e.g. infinite datum planes, non-solids)
                 - children: List of child object names
                 - parents: List of parent object names
                 - visibility: Whether object is visible
         """
         bridge = await get_bridge()
+        # Only pass the filter when given, so existing bridge calls are unchanged.
+        filter_kwargs = (
+            {} if property_names is None else {"property_names": property_names}
+        )
         obj = await bridge.get_object(
             object_name,
             doc_name,
             include_properties=include_properties,
             include_shape=include_shape,
+            **filter_kwargs,
         )
 
         result = {
@@ -142,6 +157,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
 
         if include_properties:
             result["properties"] = obj.properties
+            result["properties_truncated"] = obj.properties_truncated
 
         if include_shape and obj.shape_info:
             result["shape_info"] = obj.shape_info

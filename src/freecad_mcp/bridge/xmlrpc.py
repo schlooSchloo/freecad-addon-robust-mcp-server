@@ -703,6 +703,7 @@ _result_ = objects
         *,
         include_properties: bool = True,
         include_shape: bool = True,
+        property_names: list[str] | None = None,
     ) -> ObjectInfo:
         """Get detailed object information."""
         code = build_object_inspection_code(
@@ -710,6 +711,7 @@ _result_ = objects
             doc_name,
             include_properties=include_properties,
             include_shape=include_shape,
+            property_names=property_names,
         )
         result = await self.execute_python(code)
 

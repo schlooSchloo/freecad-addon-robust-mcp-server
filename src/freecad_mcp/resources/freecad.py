@@ -679,7 +679,7 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         {
                             "name": "inspect_object",
                             "description": "Get detailed info about an object",
-                            "key_params": ["object_name", "doc_name"],
+                            "key_params": ["object_name", "doc_name", "property_names"],
                         },
                         {
                             "name": "create_object",
