@@ -2,24 +2,41 @@
 
 ## Unreleased
 
+## Version 0.8.0 (2026-11-15)
+
+Install Robust MCP Bridge workbench 0.8.0 with this server to use local GUI
+review. Existing paired credentials remain valid. Socket is now the default
+connection; client configurations that explicitly choose XML-RPC keep that
+setting. XML-RPC, headless, embedded, and older workbench connections cannot
+provide local file review. Supported file operations fail closed unless the
+user explicitly enables the unreviewed file-operation override. See the
+[security guide](https://spkane.github.io/freecad-addon-robust-mcp-server/0.8.0/guide/security/)
+for limitations and automation options.
+
 ### Added
 
-- `FREECAD_LAZY_CONNECT` setting. When enabled, the server starts even if
-  FreeCAD is not running and connects on the first tool call, retrying on
-  each call until FreeCAD is reachable. Off by default.
-- Optional `name` parameter for `add_sketch_constraint`, so a dimension can be
-  bound to a spreadsheet by name.
+- Local review for enabled Python and macro execution and supported file
+  operations over an authenticated socket with the GUI workbench. Explicit
+  preferences and time-limited bypasses support user-controlled automation.
+- Private per-user temporary directories for screenshots and CAM artifacts,
+  with access controls on supported platforms.
+
+### Changed
+
+- Use socket mode by default so local review can be shown. CAM outputs using
+  job-selected or split paths require an explicit unreviewed-file override;
+  a single explicitly named output can be reviewed.
+- Harden generated FreeCAD code against injection through model strings and
+  reject invalid XML-RPC Host and Origin headers.
 
 ### Fixed
 
-- Tool errors now reach the MCP client with their message. Since the move to
-  MCP Python SDK 2, expected failures such as "Alias not found" or "FreeCAD is
-  not reachable" were reported only as "Error executing tool <name>". Value,
-  connection, timeout and file errors now pass through; other exceptions are
-  still treated as crashes and their details stay hidden.
-- `spreadsheet_bind_property` now binds sketch dimensions using the
-  `Constraints[N]` or `Constraints.Name` property path. Previously it rejected
-  these paths because it checked for a property with that literal name.
+- Report actual sketch degrees of freedom without calling the solver. Thanks to
+  [thopman](https://github.com/thopman/freecad-addon-robust-mcp-server/commit/23c03808d22b6c8357f988bdb45ac2a930870a6f)
+  for identifying the issue.
+- Read FreeCAD's Report view for console diagnostics in GUI sessions. Return an
+  error when console history is unavailable instead of an ambiguous empty list;
+  console queries accept between 1 and 1000 lines.
 
 ## Version 0.7.0 (2026-11-06)
 

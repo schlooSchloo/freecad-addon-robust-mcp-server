@@ -8,6 +8,8 @@ has excellent screenshot handling with view type detection.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from freecad_mcp.tools._registration import file_tool
+
 
 def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
     """Register view-related tools with the Robust MCP Server.
@@ -226,7 +228,7 @@ else:
     else:
         obj = doc.getObject({object_name!r})
         if obj is None:
-            _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
+            _result_ = {{"success": False, "error": "Object not found: " + repr({object_name!r})}}
         elif hasattr(obj, "ViewObject") and obj.ViewObject:
             obj.ViewObject.Visibility = {visible}
             _result_ = {{"success": True, "visible": {visible}}}
@@ -275,7 +277,7 @@ else:
     else:
         obj = doc.getObject({object_name!r})
         if obj is None:
-            _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
+            _result_ = {{"success": False, "error": "Object not found: " + repr({object_name!r})}}
         elif hasattr(obj, "ViewObject") and obj.ViewObject:
             obj.ViewObject.DisplayMode = {mode!r}
             _result_ = {{"success": True, "mode": {mode!r}}}
@@ -327,7 +329,7 @@ else:
     else:
         obj = doc.getObject({object_name!r})
         if obj is None:
-            _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
+            _result_ = {{"success": False, "error": "Object not found: " + repr({object_name!r})}}
         elif hasattr(obj, "ViewObject") and obj.ViewObject:
             obj.ViewObject.ShapeColor = ({color[0]}, {color[1]}, {color[2]})
             _result_ = {{"success": True, "color": {color}}}
@@ -643,7 +645,7 @@ _result_ = parts
             return result.result
         return []
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def insert_part_from_library(
         part_path: str,
         name: str | None = None,
@@ -737,13 +739,17 @@ except Exception:
         """Get recent console output from FreeCAD.
 
         Args:
-            lines: Maximum number of lines to return. Defaults to 50.
+            lines: Maximum number of lines to return (1-1000). Defaults to 50.
 
         Returns:
             Dictionary with:
                 - messages: List of console messages
                 - warnings: List of warning messages
                 - errors: List of error messages
+
+        Raises:
+            ValueError: The line limit is outside the supported range.
+            RuntimeError: Console history is unavailable in this FreeCAD session.
         """
         bridge = await get_bridge()
         console_lines = await bridge.get_console_output(lines)
