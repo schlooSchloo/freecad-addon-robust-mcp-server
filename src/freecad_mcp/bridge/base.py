@@ -62,6 +62,7 @@ class ViewAngle(str, Enum):
     LEFT = "Left"
     RIGHT = "Right"
     FIT_ALL = "FitAll"
+    CURRENT = "Current"
 
 
 class ObjectType(str, Enum):
@@ -196,6 +197,10 @@ class ScreenshotResult:
         height: Image height in pixels.
         view_angle: The view angle used.
         error: Error message if failed.
+        fit: Whether all objects were fitted into the view before capture.
+        doc_name: Name of the captured document.
+        camera: The camera used for the capture (see bridge.view3d.camera_info).
+        note: Extra information, e.g. that a non-active 3D view was used.
     """
 
     success: bool
@@ -205,6 +210,10 @@ class ScreenshotResult:
     height: int = 0
     view_angle: ViewAngle | None = None
     error: str | None = None
+    fit: bool = True
+    doc_name: str | None = None
+    camera: dict[str, Any] | None = None
+    note: str | None = None
 
 
 @dataclass
@@ -585,14 +594,17 @@ class FreecadBridge(ABC):
         width: int = 800,
         height: int = 600,
         doc_name: str | None = None,
+        fit: bool = True,
     ) -> ScreenshotResult:
-        """Capture a screenshot of the 3D view.
+        """Capture a screenshot of the document's 3D view.
 
         Args:
-            view_angle: View angle to set before capture.
+            view_angle: View angle to set before capture (Isometric if None;
+                FitAll and Current keep the orientation).
             width: Image width in pixels.
             height: Image height in pixels.
             doc_name: Document name (uses active if None).
+            fit: Whether to fit all objects in the view before capture.
 
         Returns:
             ScreenshotResult with image data or error.
@@ -604,11 +616,15 @@ class FreecadBridge(ABC):
         view_angle: ViewAngle,
         doc_name: str | None = None,
     ) -> None:
-        """Set the 3D view angle.
+        """Set the 3D view angle of a document's 3D view.
 
         Args:
             view_angle: View angle to set.
             doc_name: Document name (uses active if None).
+
+        Raises:
+            ValueError: The document or its 3D view does not exist, or
+                FreeCAD reported an error.
         """
 
     # =========================================================================

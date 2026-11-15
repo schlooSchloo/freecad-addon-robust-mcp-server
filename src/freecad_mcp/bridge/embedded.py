@@ -46,7 +46,12 @@ from freecad_mcp.bridge.object_editing import (
 )
 from freecad_mcp.bridge.object_inspection import build_object_inspection_code
 from freecad_mcp.bridge.private_scratch import private_scratch_directory
-from freecad_mcp.bridge.screenshot import build_screenshot_code
+from freecad_mcp.bridge.screenshot import (
+    build_screenshot_code,
+    build_set_view_code,
+    execution_error_message,
+    screenshot_result,
+)
 
 
 class EmbeddedBridge(FreecadBridge):
@@ -752,8 +757,9 @@ _result_ = {{
         width: int = 800,
         height: int = 600,
         doc_name: str | None = None,
+        fit: bool = True,
     ) -> ScreenshotResult:
-        """Capture a screenshot of the 3D view.
+        """Capture a screenshot of the document's 3D view.
 
         Note: In embedded headless mode, screenshots are typically not available.
 
@@ -762,6 +768,7 @@ _result_ = {{
             width: Image width in pixels.
             height: Image height in pixels.
             doc_name: Document name (uses active if None).
+            fit: Whether to fit all objects in the view before capture.
 
         Returns:
             ScreenshotResult with image data or error.
@@ -776,78 +783,38 @@ _result_ = {{
                 width=width,
                 height=height,
                 view_angle=view_angle,
+                fit=fit,
             )
 
         # If GUI is available, attempt screenshot
         view_angle_str = view_angle.value if view_angle else "Isometric"
-        code = build_screenshot_code(doc_name, view_angle_str, width, height)
+        code = build_screenshot_code(doc_name, view_angle_str, width, height, fit)
         result = await self.execute_python(code)
-
-        if result.success and result.result:
-            return ScreenshotResult(
-                success=True,
-                data=result.result["data"],
-                format=result.result["format"],
-                width=result.result["width"],
-                height=result.result["height"],
-                view_angle=view_angle,
-            )
-
-        return ScreenshotResult(
-            success=False,
-            error=result.error_traceback or "Failed to capture screenshot",
-            width=width,
-            height=height,
-            view_angle=view_angle,
-        )
+        return screenshot_result(result, view_angle, width, height, fit)
 
     async def set_view(
         self,
         view_angle: ViewAngle,
         doc_name: str | None = None,
     ) -> None:
-        """Set the 3D view angle.
+        """Set the 3D view angle of the document's 3D view.
 
         Args:
             view_angle: View angle to set.
             doc_name: Document name (uses active if None).
+
+        Raises:
+            ValueError: The document or its 3D view does not exist.
         """
         gui_available = await self.is_gui_available()
 
         if not gui_available:
             return  # Silently ignore in headless mode
 
-        view_angle_str = view_angle.value
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-view = FreeCADGui.ActiveDocument.ActiveView
-if view is None:
-    raise ValueError("No active view")
-
-view_type = {view_angle_str!r}
-if view_type == "FitAll":
-    view.fitAll()
-elif view_type == "Isometric":
-    view.viewIsometric()
-elif view_type == "Front":
-    view.viewFront()
-elif view_type == "Back":
-    view.viewRear()
-elif view_type == "Top":
-    view.viewTop()
-elif view_type == "Bottom":
-    view.viewBottom()
-elif view_type == "Left":
-    view.viewLeft()
-elif view_type == "Right":
-    view.viewRight()
-
-_result_ = True
-"""
-        await self.execute_python(code)
+        code = build_set_view_code(doc_name, view_angle.value)
+        result = await self.execute_python(code)
+        if not result.success:
+            raise ValueError(execution_error_message(result, "Failed to set the view"))
 
     # =========================================================================
     # Macros
