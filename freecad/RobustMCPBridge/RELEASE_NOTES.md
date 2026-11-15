@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## Version 0.8.0 (2026-11-15)
+
+Use with Robust MCP Server 0.8.0 for the file-review workflow. Existing paired
+credentials remain valid. The bridge executes with the FreeCAD user's full
+permissions and is not a sandbox.
+
+### Added
+
+- Local GUI review of unsafe Python and macro execution, including the code,
+  macro contents, and explicit allow or deny. Users may configure review and
+  opt into a time-limited bypass; exact macro versions may also be approved.
+- Local review of supported file operations, showing the operation, requested
+  and resolved paths, target details, and generated code. A target is checked
+  again before dispatch, but this is not an atomic filesystem operation.
+- A persistent bridge status indicator and warnings about client permissions
+  and review overrides.
+
+### Changed
+
+- XML-RPC validates loopback Host and Origin headers. Temporary screenshot and
+  CAM artifacts use private per-user directories where supported.
+- Review requires an authenticated socket connection to a GUI workbench;
+  explicit overrides are available for unattended workflows.
+
+## Version 0.7.2 (2026-11-07)
+
+### Changed
+
+- Workbench command identifiers now use the `RobustMCPBridge_` prefix to avoid
+  collisions with other addons. Custom shortcuts using the old command names
+  must be configured again. Startup no longer logs routine messages when the
+  bridge is disabled.
+- Direct-launch bridge scripts use a private package for their imports, avoiding
+  generic module names and modifications to the global Python import path.
+
+## Version 0.7.1 (2026-11-06)
+
+### Fixed
+
+- The workbench manifest now points to the dedicated `released` branch for
+  Addon Manager installation and updates. Stable release archives are checked
+  against the same source as that branch before publication.
+
 ## Version 0.7.0 (2026-11-06)
 
 Update the workbench and MCP server together. Pair the bridge before connecting;

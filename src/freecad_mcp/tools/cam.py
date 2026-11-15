@@ -19,6 +19,8 @@ from typing import Any
 
 from mcp.server.mcpserver.exceptions import ToolError
 
+from freecad_mcp.bridge.file_review import file_review_target
+from freecad_mcp.tools._registration import file_tool
 from freecad_mcp.tools.utils import wrap_with_transaction
 
 CAM_TIMEOUT_MS = 600_000
@@ -169,7 +171,7 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             },
         )
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def cam_create_job(
         model_objects: list[str],
         doc_name: str | None = None,
@@ -202,20 +204,36 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
         Returns:
             The job description from ``cam_inspect_job``.
         """
-        return await run(
-            "create_job",
-            {
-                "model_objects": model_objects,
-                "doc_name": doc_name,
-                "label": label,
-                "template": template,
-                "model_offset": model_offset,
-                "stock": stock,
-                "default_tool_controller": default_tool_controller,
-                "properties": properties,
-            },
-            "Create CAM Job",
-        )
+        token = None
+        if template is None:
+            bridge = await get_bridge()
+            preference = await bridge.execute_python(
+                "import Path.Preferences as _cam_prefs\n"
+                "_result_ = _cam_prefs.defaultJobTemplate() or ''"
+            )
+            if not preference.success or not isinstance(preference.result, str):
+                raise ToolError("ReviewUnavailable: could not resolve the CAM template")
+            template = preference.result
+            if template:
+                token = file_review_target.set((template, "read", "path"))
+        try:
+            return await run(
+                "create_job",
+                {
+                    "model_objects": model_objects,
+                    "doc_name": doc_name,
+                    "label": label,
+                    "template": template,
+                    "model_offset": model_offset,
+                    "stock": stock,
+                    "default_tool_controller": default_tool_controller,
+                    "properties": properties,
+                },
+                "Create CAM Job",
+            )
+        finally:
+            if token is not None:
+                file_review_target.reset(token)
 
     @mcp.tool()
     async def cam_set_stock(
@@ -270,7 +288,7 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             "Set CAM Stock",
         )
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def cam_add_tool_controller(
         tool: dict[str, Any],
         job_name: str | None = None,
@@ -698,7 +716,7 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             },
         )
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def cam_post_process(
         job_name: str | None = None,
         post_processor: str | None = None,
@@ -744,6 +762,17 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             Dictionary with machine, post_processor, args, sections, lines,
             files, cycle_time and optionally gcode.
         """
+        from freecad_mcp.config import get_config
+
+        if not get_config().allow_unreviewed_file_operations and (
+            use_job_output or (output_file and split_files)
+        ):
+            raise ToolError(
+                "ReviewUnavailable: CAM output with job-defined paths or split "
+                "files cannot yet be reviewed as exact individual targets. "
+                "Use an explicit output_file with split_files=False, or explicitly "
+                "enable the unreviewed file-operation override."
+            )
         return await run(
             "post_process",
             {
@@ -760,7 +789,7 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             "Post Process CAM Job",
         )
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def cam_export_job_template(
         file_path: str,
         job_name: str | None = None,
@@ -802,7 +831,7 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             },
         )
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def cam_check_job(
         job_name: str | None = None,
         report_file: str | None = None,
@@ -837,7 +866,7 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             },
         )
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def cam_simulate(
         job_name: str | None = None,
         operations: list[str] | None = None,
@@ -937,7 +966,7 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             "Place CAM Model",
         )
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def cam_import_tool_library(
         file_path: str,
         library_id: str | None = None,
@@ -972,7 +1001,7 @@ def register_cam_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> No
             },
         )
 
-    @mcp.tool()
+    @file_tool(mcp)
     async def cam_export_tool_library(
         library: str,
         file_path: str,

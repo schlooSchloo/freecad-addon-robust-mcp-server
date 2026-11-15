@@ -108,7 +108,7 @@ try:
     if {body_name!r}:
         body = doc.getObject({body_name!r})
         if body is None:
-            raise ValueError(f"Body not found: {body_name!r}")
+            raise ValueError("Body not found: " + repr({body_name!r}))
 
         # Add sketch to body
         sketch = body.newObject("Sketcher::SketchObject", sketch_name)
@@ -190,7 +190,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Rectangle")
@@ -258,7 +258,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Circle")
@@ -313,7 +313,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Find the body containing this sketch
 body = None
@@ -409,7 +409,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Find the body containing this sketch
 body = None
@@ -517,7 +517,7 @@ if abs(volume_removed) < 1e-6:
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 obj = doc.getObject({object_name!r})
 if obj is None:
-    raise ValueError(f"Object not found: {object_name!r}")
+    raise ValueError("Object not found: " + repr({object_name!r}))
 
 # Check if this is in a PartDesign Body
 body = None
@@ -602,7 +602,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 obj = doc.getObject({object_name!r})
 if obj is None:
-    raise ValueError(f"Object not found: {object_name!r}")
+    raise ValueError("Object not found: " + repr({object_name!r}))
 
 # Check if this is in a PartDesign Body
 body = None
@@ -694,7 +694,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Find the body containing this sketch
 body = None
@@ -805,7 +805,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Find the body containing this sketch
 body = None
@@ -919,7 +919,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Find the body containing this sketch
 body = None
@@ -1008,7 +1008,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 feature = doc.getObject({feature_name!r})
 if feature is None:
-    raise ValueError(f"Feature not found: {feature_name!r}")
+    raise ValueError("Feature not found: " + repr({feature_name!r}))
 
 # Find the body containing this feature
 body = None
@@ -1084,7 +1084,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 feature = doc.getObject({feature_name!r})
 if feature is None:
-    raise ValueError(f"Feature not found: {feature_name!r}")
+    raise ValueError("Feature not found: " + repr({feature_name!r}))
 
 # Find the body containing this feature
 body = None
@@ -1167,7 +1167,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 feature = doc.getObject({feature_name!r})
 if feature is None:
-    raise ValueError(f"Feature not found: {feature_name!r}")
+    raise ValueError("Feature not found: " + repr({feature_name!r}))
 
 # Find the body containing this feature
 body = None
@@ -1237,7 +1237,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Line")
@@ -1299,7 +1299,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Arc")
@@ -1361,7 +1361,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Point")
@@ -1509,11 +1509,11 @@ doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({d
 
 profile = doc.getObject({profile_sketch!r})
 if profile is None:
-    raise ValueError(f"Profile sketch not found: {profile_sketch!r}")
+    raise ValueError("Profile sketch not found: " + repr({profile_sketch!r}))
 
 spine = doc.getObject({spine_sketch!r})
 if spine is None:
-    raise ValueError(f"Spine sketch not found: {spine_sketch!r}")
+    raise ValueError("Spine sketch not found: " + repr({spine_sketch!r}))
 
 # Find the body containing the profile sketch
 body = None
@@ -1593,7 +1593,7 @@ if doc is None:
 
 body = doc.getObject({body_name!r})
 if body is None:
-    raise ValueError(f"Body not found: {body_name!r}")
+    raise ValueError("Body not found: " + repr({body_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Datum Plane")
@@ -1662,7 +1662,7 @@ if doc is None:
 
 body = doc.getObject({body_name!r})
 if body is None:
-    raise ValueError(f"Body not found: {body_name!r}")
+    raise ValueError("Body not found: " + repr({body_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Datum Line")
@@ -1727,7 +1727,7 @@ if doc is None:
 
 body = doc.getObject({body_name!r})
 if body is None:
-    raise ValueError(f"Body not found: {body_name!r}")
+    raise ValueError("Body not found: " + repr({body_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Datum Point")
@@ -1806,7 +1806,7 @@ if doc is None:
 
 obj = doc.getObject({object_name!r})
 if obj is None:
-    raise ValueError(f"Object not found: {object_name!r}")
+    raise ValueError("Object not found: " + repr({object_name!r}))
 
 # Check if this is in a PartDesign Body
 body = None
@@ -1890,7 +1890,7 @@ if doc is None:
 
 obj = doc.getObject({object_name!r})
 if obj is None:
-    raise ValueError(f"Object not found: {object_name!r}")
+    raise ValueError("Object not found: " + repr({object_name!r}))
 
 # Check if this is in a PartDesign Body
 body = None
@@ -2057,11 +2057,11 @@ if doc is None:
 
 profile = doc.getObject({profile_sketch!r})
 if profile is None:
-    raise ValueError(f"Profile sketch not found: {profile_sketch!r}")
+    raise ValueError("Profile sketch not found: " + repr({profile_sketch!r}))
 
 spine = doc.getObject({spine_sketch!r})
 if spine is None:
-    raise ValueError(f"Spine sketch not found: {spine_sketch!r}")
+    raise ValueError("Spine sketch not found: " + repr({spine_sketch!r}))
 
 # Find the body containing the profile sketch
 body = None
@@ -2134,7 +2134,7 @@ except Exception:
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Ellipse")
@@ -2194,7 +2194,7 @@ import Sketcher
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Polygon")
@@ -2278,7 +2278,7 @@ import Sketcher
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Slot")
@@ -2377,7 +2377,7 @@ import Part
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 points = {points!r}
 if len(points) < 2:
@@ -2478,7 +2478,7 @@ import Sketcher
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Constraint")
@@ -2924,11 +2924,11 @@ except Exception:
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 ref_obj = doc.getObject({object_name!r})
 if ref_obj is None:
-    raise ValueError(f"Object not found: {object_name!r}")
+    raise ValueError("Object not found: " + repr({object_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add External Geometry")
@@ -2977,7 +2977,7 @@ except Exception:
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Delete Sketch Geometry")
@@ -3023,7 +3023,7 @@ except Exception:
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Delete Sketch Constraint")
@@ -3063,7 +3063,9 @@ except Exception:
                 - constraint_count: Number of constraints
                 - external_geometry_count: Number of external geometry references
                 - fully_constrained: Whether sketch is fully constrained
-                - dof: Degrees of freedom remaining
+                - dof: Degrees of freedom remaining, or None if unavailable; may be
+                  stale if the sketch has not been recomputed
+                - state: FreeCAD object state flags, including any error state
         """
         bridge = await get_bridge()
 
@@ -3071,7 +3073,7 @@ except Exception:
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 external_geometry_count = sum(
     len(subelements) for _, subelements in sketch.ExternalGeometry
@@ -3083,7 +3085,8 @@ _result_ = {{
     "constraint_count": sketch.ConstraintCount,
     "external_geometry_count": external_geometry_count,
     "fully_constrained": sketch.FullyConstrained if hasattr(sketch, "FullyConstrained") else None,
-    "dof": sketch.solve() if hasattr(sketch, "solve") else None,
+    "dof": getattr(sketch, "DoF", None),
+    "state": list(sketch.State) if hasattr(sketch, "State") else None,
 }}
 """
         result = await bridge.execute_python(code)
@@ -3118,7 +3121,7 @@ _result_ = {{
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError("Sketch not found: " + repr({sketch_name!r}))
 
 # Wrap in transaction for undo support
 doc.openTransaction("Toggle Construction")
