@@ -529,18 +529,22 @@ class FreecadBridge(ABC):
         properties: dict[str, Any],
         doc_name: str | None = None,
     ) -> ObjectInfo:
-        """Edit object properties.
+        """Edit object properties in one undo step, all or nothing.
 
         Args:
             obj_name: Name of the object to edit.
-            properties: Property values to set.
+            properties: Property values to set. Link properties take object
+                names, a string starting with "=" sets an expression (see
+                ``freecad_mcp.bridge.object_editing``).
             doc_name: Document name (uses active if None).
 
         Returns:
-            Updated ObjectInfo.
+            Updated ObjectInfo whose ``properties`` hold the values FreeCAD
+            stored (an ``ObjectEditResult`` with ``notes``).
 
         Raises:
-            ValueError: If object not found.
+            ValueError: If the object or a property is not found, or a value
+                cannot be set. Nothing is changed in that case.
         """
 
     @abstractmethod
@@ -548,12 +552,20 @@ class FreecadBridge(ABC):
         self,
         obj_name: str,
         doc_name: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Delete an object.
+
+        If the object is a feature of a PartDesign body, the body is updated
+        first as the FreeCAD GUI does: the Tip moves back to the previous
+        feature and the next feature is rebuilt on the previous one.
 
         Args:
             obj_name: Name of the object to delete.
             doc_name: Document name (uses active if None).
+
+        Returns:
+            Report with ``deleted``, ``label``, ``notes`` and, for body
+            features, ``body``, ``tip`` and ``body_shape_valid``.
 
         Raises:
             ValueError: If object not found.

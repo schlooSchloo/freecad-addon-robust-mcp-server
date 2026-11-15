@@ -36,6 +36,12 @@ from freecad_mcp.bridge.console import (
     build_console_output_code,
     console_output_from_result,
 )
+from freecad_mcp.bridge.object_editing import (
+    build_delete_object_code,
+    build_edit_object_code,
+    delete_result_from_execution,
+    edit_result_from_execution,
+)
 from freecad_mcp.bridge.object_inspection import build_object_inspection_code
 from freecad_mcp.bridge.screenshot import build_screenshot_code
 
@@ -1065,62 +1071,17 @@ _result_ = {{
         doc_name: str | None = None,
     ) -> ObjectInfo:
         """Edit object properties."""
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-obj = doc.getObject({obj_name!r})
-if obj is None:
-    raise ValueError("Object not found: " + repr({obj_name!r}))
-
-# Set properties
-for prop_name, prop_val in {properties!r}.items():
-    if hasattr(obj, prop_name):
-        setattr(obj, prop_name, prop_val)
-
-doc.recompute()
-
-_result_ = {{
-    "name": obj.Name,
-    "label": obj.Label,
-    "type_id": obj.TypeId,
-    "visibility": obj.ViewObject.Visibility if hasattr(obj, "ViewObject") and obj.ViewObject else True,
-    "children": [c.Name for c in obj.OutList] if hasattr(obj, "OutList") else [],
-    "parents": [p.Name for p in obj.InList] if hasattr(obj, "InList") else [],
-}}
-"""
-        result = await self.execute_python(code)
-
-        if result.success and result.result:
-            return ObjectInfo(**result.result)
-
-        error_msg = result.error_traceback or "Failed to edit object"
-        raise ValueError(error_msg)
+        code = build_edit_object_code(obj_name, properties, doc_name)
+        return edit_result_from_execution(await self.execute_python(code))
 
     async def delete_object(
         self,
         obj_name: str,
         doc_name: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Delete an object."""
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-obj = doc.getObject({obj_name!r})
-if obj is None:
-    raise ValueError("Object not found: " + repr({obj_name!r}))
-
-doc.removeObject({obj_name!r})
-_result_ = True
-"""
-        result = await self.execute_python(code)
-
-        if not result.success:
-            error_msg = result.error_traceback or "Failed to delete object"
-            raise ValueError(error_msg)
+        code = build_delete_object_code(obj_name, doc_name)
+        return delete_result_from_execution(await self.execute_python(code))
 
     # =========================================================================
     # View and Screenshot

@@ -492,11 +492,41 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         properties: dict[str, Any],
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Edit properties of an existing FreeCAD object.
+        """Edit properties of an existing FreeCAD object, including links and expressions.
+
+        All changes are made in one undo step named after them (for example
+        "Edit Pocket.Length"). If any property name is unknown or any value
+        cannot be set, nothing is changed and the error names the problem
+        (with the closest property names for typos).
+
+        Value forms, chosen by the property's type:
+            - Numbers, booleans, text, enumeration names; quantities may carry
+              units ("5 mm", "10 deg").
+            - Link (e.g. Body.BaseFeature, Body.Tip, Part::Scale.Base): an
+              object name (or unique label); null clears it.
+            - Link list (e.g. Group, Originals): a list of object names.
+            - Link with sub-elements (Pad.Profile, Pocket.UpToFace) and
+              sub-element lists (AttachmentSupport): "Name" for the whole
+              object, ["Name", ["Face1"]], {"object": "Name", "subelements":
+              ["Face1"]}, or (lists only) a list of those. An empty
+              sub-element list [] means the whole object and is stored as [""].
+            - Cross-document link (App::Link.LinkedObject): "Name", or
+              {"object": "Name", "document": "OtherDoc"}.
+            - Placement: {"position": [x, y, z], "rotation": [yaw, pitch,
+              roll]} (degrees), {"position": [...], "axis": [x, y, z],
+              "angle": degrees}, or [[x, y, z], [yaw, pitch, roll]]. Missing
+              parts keep their current value.
+            - Vector: [x, y, z].
+            - Expression: a string starting with "=", e.g. {"Length":
+              "=Spreadsheet.Depth * 2"} or {"Placement.Base.z": "=Box.Height"}.
+              Just "=" removes the property's expression. Setting a plain value
+              removes an existing expression on that property so the value
+              is kept. Every string starting with "=" is read as an
+              expression, also for text properties.
 
         Args:
-            object_name: Name of the object to edit.
-            properties: Dictionary of property names and new values.
+            object_name: Internal name of the object to edit.
+            properties: Property names mapped to new values (forms above).
             doc_name: Document containing the object. Uses active document if None.
 
         Returns:
@@ -504,6 +534,13 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 - name: Object name
                 - label: Object label
                 - type_id: Object type
+                - properties: The value FreeCAD stored for each edited property,
+                  read back after recompute (links as object names or
+                  {"object", "subelements"}; expressions as {"expression",
+                  "value"}), so you can confirm a link or attachment stuck
+                - notes: Anything worth knowing, e.g. a normalised sub-element
+                  list, a removed expression, or the object being invalid
+                  after recompute
         """
         bridge = await get_bridge()
         obj = await bridge.edit_object(object_name, properties, doc_name)
@@ -511,6 +548,8 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             "name": obj.name,
             "label": obj.label,
             "type_id": obj.type_id,
+            "properties": obj.properties,
+            "notes": list(getattr(obj, "notes", [])),
         }
 
     @mcp.tool()
@@ -520,17 +559,35 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
     ) -> dict[str, Any]:
         """Delete an object from a FreeCAD document.
 
+        Deleting a feature of a PartDesign body updates the body the way the
+        FreeCAD GUI does: if the feature was the body's Tip, the Tip moves
+        back to the previous solid feature, and a following feature is
+        rebuilt on the previous one. The delete is one undo step named
+        "Delete <label>". Objects that still linked to the deleted object are
+        listed in the notes (their links are now empty).
+
         Args:
-            object_name: Name of the object to delete.
+            object_name: Internal name of the object to delete.
             doc_name: Document containing the object. Uses active document if None.
 
         Returns:
             Dictionary with delete result:
                 - success: Whether delete was successful
+                - deleted: Name of the deleted object
+                - label: Its label
+                - body: The PartDesign body it belonged to (body features only)
+                - tip: The body's Tip after the delete (body features only)
+                - body_shape_valid: Whether the body still has a valid shape
+                  (body features only)
+                - notes: What else changed, e.g. "Pocket was the Tip of Body;
+                  the Tip is now Pad"
         """
         bridge = await get_bridge()
-        await bridge.delete_object(object_name, doc_name)
-        return {"success": True}
+        report = await bridge.delete_object(object_name, doc_name)
+        result: dict[str, Any] = {"success": True}
+        if isinstance(report, dict):
+            result.update(report)
+        return result
 
     @mcp.tool()
     async def boolean_operation(

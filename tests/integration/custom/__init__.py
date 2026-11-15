@@ -1,1 +1,1 @@
-"""Integration tests for changes made on the fork's ``custom`` branch."""
+"""Integration tests for the fork's custom fixes and tools."""
