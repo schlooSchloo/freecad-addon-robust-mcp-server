@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from freecad_mcp.bridge.file_review import file_review_target
+from freecad_mcp.bridge.object_health import OBJECT_HEALTH_HELPERS
 from freecad_mcp.tools._registration import file_tool
 
 
@@ -219,37 +220,44 @@ def register_document_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) 
     async def recompute_document(doc_name: str | None = None) -> dict[str, Any]:
         """Recompute a FreeCAD document to update all dependent objects.
 
+        Only objects that changed are recomputed (use ``recompute`` to force
+        every object). After recomputing, every object FreeCAD marks as
+        failed is listed with FreeCAD's own error message, and success is
+        False if any object failed.
+
         Args:
             doc_name: Name of document to recompute. Uses active document if None.
 
         Returns:
             Dictionary with recompute result:
-                - success: Whether recompute was successful
-                - invalid_objects: Objects reporting a recompute error
+                - success: False if any object failed to recompute
+                - invalid_objects: Failed objects (up to 50), each with
+                  document, name, label, type_id, state, message (FreeCAD's
+                  own error text), dependents (objects built on it, whose
+                  results may be out of date) and, for broken links,
+                  link_problems naming the missing file, document or object
+                - invalid_objects_truncated: True if more objects failed
+                  than are listed
+                - error: Summary naming the failed objects and their
+                  messages, or None on success
         """
         bridge = await get_bridge()
-        code = f"""
+        code = (
+            OBJECT_HEALTH_HELPERS
+            + f"""
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
 doc.recompute()
-invalid = []
-for obj in FreeCAD.getDependentObjects(doc.Objects):
-    state = list(obj.State)
-    if 'Invalid' in state or 'Error' in state:
-        invalid.append({{'document': obj.Document.Name, 'name': obj.Name, 'label': obj.Label, 'state': state}})
-_result_ = {{'success': not invalid, 'invalid_objects': invalid}}
+_result_ = _mcp_recompute_report(FreeCAD.getDependentObjects(doc.Objects))
 """
+        )
         result = await bridge.execute_python(code)
         if result.success and isinstance(result.result, dict):
-            return {
-                **result.result,
-                "error": (
-                    "Document contains objects with recompute errors"
-                    if not result.result.get("success")
-                    else None
-                ),
-            }
+            report = dict(result.result)
+            if not report.get("success") and not report.get("error"):
+                report["error"] = "Document contains objects with recompute errors"
+            return report
         return {
             "success": False,
             "error": result.error_traceback or "Failed to verify recompute result",

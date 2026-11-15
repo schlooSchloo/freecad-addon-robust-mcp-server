@@ -764,17 +764,35 @@ except Exception:
     async def recompute(doc_name: str | None = None) -> dict[str, Any]:
         """Force recompute of all objects in a document.
 
+        Every object is marked as changed and the document is recomputed.
+        Afterwards, every object FreeCAD marks as failed is listed with
+        FreeCAD's own error message, and success is False if any failed.
+
         Args:
             doc_name: Document to recompute. Uses active document if None.
 
         Returns:
             Dictionary with result:
-                - success: Whether recompute completed
-                - touch_count: Number of objects that were recomputed
+                - success: False if any object failed to recompute
+                - touch_count: Number of objects marked for recompute
+                - invalid_objects: Failed objects (up to 50), each with
+                  document, name, label, type_id, state, message (FreeCAD's
+                  own error text), dependents (objects built on it, whose
+                  results may be out of date) and, for broken links,
+                  link_problems naming the missing file, document or object
+                - invalid_objects_truncated: True if more objects failed
+                  than are listed
+                - error: Summary naming the failed objects and their
+                  messages, or None on success
         """
+        # Imported here to keep this fork's change inside this function.
+        from freecad_mcp.bridge.object_health import OBJECT_HEALTH_HELPERS
+
         bridge = await get_bridge()
 
-        code = f"""
+        code = (
+            OBJECT_HEALTH_HELPERS
+            + f"""
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     _result_ = {{"success": False, "error": "No document found", "touch_count": 0}}
@@ -788,8 +806,10 @@ else:
 
     doc.recompute()
 
-    _result_ = {{"success": True, "touch_count": touch_count}}
+    _result_ = _mcp_recompute_report(FreeCAD.getDependentObjects(doc.Objects))
+    _result_["touch_count"] = touch_count
 """
+        )
         result = await bridge.execute_python(code)
         if result.success and result.result:
             return result.result
