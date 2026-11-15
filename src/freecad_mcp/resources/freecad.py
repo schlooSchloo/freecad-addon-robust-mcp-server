@@ -1321,10 +1321,17 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         {
                             "name": "get_screenshot",
                             "description": (
-                                "Capture a 3D view screenshot (GUI only); "
-                                "successful responses contain base64-encoded PNG in data"
+                                "Capture a 3D view screenshot (GUI only); returns a "
+                                "PNG image block plus JSON details (size, camera). "
+                                'view_angle="Current" keeps the current camera'
                             ),
-                            "key_params": ["view_angle", "width", "height", "doc_name"],
+                            "key_params": [
+                                "view_angle",
+                                "width",
+                                "height",
+                                "doc_name",
+                                "fit",
+                            ],
                         },
                         {
                             "name": "set_view_angle",
@@ -1338,18 +1345,27 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "zoom_in",
-                            "description": "Zoom in",
-                            "key_params": ["factor"],
+                            "description": "Zoom in the document's 3D view",
+                            "key_params": ["factor", "doc_name"],
                         },
                         {
                             "name": "zoom_out",
-                            "description": "Zoom out",
-                            "key_params": ["factor"],
+                            "description": "Zoom out the document's 3D view",
+                            "key_params": ["factor", "doc_name"],
                         },
                         {
                             "name": "set_camera_position",
-                            "description": "Set exact camera position and orientation",
-                            "key_params": ["position", "direction", "up_vector"],
+                            "description": (
+                                "Place the camera and look at a point; frame a "
+                                "region with view_height"
+                            ),
+                            "key_params": [
+                                "position",
+                                "look_at",
+                                "up_vector",
+                                "view_height",
+                                "doc_name",
+                            ],
                         },
                         {
                             "name": "set_object_visibility",

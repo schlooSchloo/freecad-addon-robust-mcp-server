@@ -1,8 +1,10 @@
 """Tests for view and GUI tools module."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from mcp.types import ImageContent
 
 from freecad_mcp.bridge.base import ExecutionResult, ScreenshotResult, WorkbenchInfo
 
@@ -44,12 +46,12 @@ class TestViewTools:
 
     @pytest.mark.asyncio
     async def test_get_screenshot_success(self, register_tools, mock_bridge):
-        """get_screenshot should return base64 image data."""
+        """get_screenshot should return an image block and JSON details."""
         # get_screenshot calls bridge.get_screenshot which returns ScreenshotResult
         mock_bridge.get_screenshot = AsyncMock(
             return_value=ScreenshotResult(
                 success=True,
-                data="iVBORw0KGgo...",  # Base64 PNG data
+                data="iVBORw0KGgo=",  # Base64 PNG data
                 format="png",
                 width=800,
                 height=600,
@@ -58,11 +60,14 @@ class TestViewTools:
         )
 
         get_screenshot = register_tools["get_screenshot"]
-        result = await get_screenshot(view_angle="Isometric")
+        image, text = await get_screenshot(view_angle="Isometric")
 
-        assert result["success"] is True
-        assert "data" in result
-        assert result["format"] == "png"
+        assert isinstance(image, ImageContent)
+        assert image.data == "iVBORw0KGgo="
+        assert image.mime_type == "image/png"
+        details = json.loads(text.text)
+        assert details["success"] is True
+        assert details["format"] == "png"
         mock_bridge.get_screenshot.assert_called_once()
 
     @pytest.mark.asyncio
@@ -71,7 +76,7 @@ class TestViewTools:
         mock_bridge.get_screenshot = AsyncMock(
             return_value=ScreenshotResult(
                 success=True,
-                data="...",
+                data="iVBORw0KGgo=",
                 format="png",
                 width=1920,
                 height=1080,
@@ -80,14 +85,15 @@ class TestViewTools:
         )
 
         get_screenshot = register_tools["get_screenshot"]
-        result = await get_screenshot(width=1920, height=1080)
+        _, text = await get_screenshot(width=1920, height=1080)
 
-        assert result["width"] == 1920
-        assert result["height"] == 1080
+        details = json.loads(text.text)
+        assert details["width"] == 1920
+        assert details["height"] == 1080
 
     @pytest.mark.asyncio
     async def test_get_screenshot_headless_error(self, register_tools, mock_bridge):
-        """get_screenshot should return error in headless mode."""
+        """get_screenshot should raise an error in headless mode."""
         mock_bridge.get_screenshot = AsyncMock(
             return_value=ScreenshotResult(
                 success=False,
@@ -100,19 +106,15 @@ class TestViewTools:
         )
 
         get_screenshot = register_tools["get_screenshot"]
-        result = await get_screenshot()
-
-        assert result["success"] is False
-        assert "headless" in result["error"]
+        with pytest.raises(ValueError, match="headless"):
+            await get_screenshot()
 
     @pytest.mark.asyncio
     async def test_get_screenshot_invalid_view_angle(self, register_tools, mock_bridge):
-        """get_screenshot should return error for invalid view angle."""
+        """get_screenshot should raise an error for an invalid view angle."""
         get_screenshot = register_tools["get_screenshot"]
-        result = await get_screenshot(view_angle="InvalidAngle")
-
-        assert result["success"] is False
-        assert "Invalid view_angle" in result["error"]
+        with pytest.raises(ValueError, match="Invalid view_angle"):
+            await get_screenshot(view_angle="InvalidAngle")
 
     @pytest.mark.asyncio
     async def test_set_view_angle(self, register_tools, mock_bridge):
