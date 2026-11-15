@@ -11,6 +11,8 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from freecad_mcp.tools.custom.shape_snippets import SKETCH_PLANE_CODE
+
 _CONSTRAINT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
@@ -79,10 +81,18 @@ def register_partdesign_tools(
         Args:
             body_name: Name of PartDesign Body to attach to. Creates standalone if None.
             plane: Plane to attach sketch to. Options:
-                - "XY_Plane" - Horizontal plane
-                - "XZ_Plane" - Front vertical plane
-                - "YZ_Plane" - Side vertical plane
-                - Face name like "Face1" to attach to body face
+                - "XY_Plane" - Horizontal plane (also "XY")
+                - "XZ_Plane" - Front vertical plane (also "XZ")
+                - "YZ_Plane" - Side vertical plane (also "YZ")
+                - Face name like "Face1" to attach to a face of the body
+                  (needs body_name)
+                - The name or label of a datum plane (PartDesign or Part) or
+                  origin plane in the document
+                With body_name, XY/XZ/YZ always mean that body's own origin
+                planes, whatever they are numbered (e.g. "XZ_Plane001" in a
+                second body). A sketch in a body can only attach to planes in
+                the same body. Without body_name, XY/XZ/YZ place the sketch
+                (no attachment) and a named plane attaches it.
             name: Sketch name. Auto-generated if None.
             doc_name: Target document. Uses active document if None.
 
@@ -91,70 +101,95 @@ def register_partdesign_tools(
                 - name: Sketch name
                 - label: Sketch label
                 - type_id: Object type
-                - support: What the sketch is attached to
+                - support: What the sketch is attached to (FreeCAD's text)
+                - attached_to: The plane or face used: name, label, type_id,
+                  role (for origin planes), sub_element; None when the sketch
+                  is only placed, not attached
+                - attachment_kind: "origin_plane", "datum_plane", "body_face"
+                  or "standard_plane" (standalone, placed not attached)
+                - map_mode: Attachment mode ("FlatFace") or "Deactivated"
+                - origin: Sketch origin in global coordinates [x, y, z]
+                - normal: Sketch normal in global coordinates [x, y, z]
+
+        Raises:
+            ValueError: If the body or plane is not found, the plane is not
+                a plane, or the face does not exist. No sketch is left behind.
         """
         bridge = await get_bridge()
 
-        code = f"""
+        code = (
+            SKETCH_PLANE_CODE
+            + f"""
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     doc = FreeCAD.newDocument("Unnamed")
+
+body = None
+if {body_name!r}:
+    body = doc.getObject({body_name!r})
+    if body is None:
+        raise ValueError("Body not found: " + repr({body_name!r}))
+
+# Resolve the plane before creating anything, so a bad name leaves no sketch.
+support, sub_element, kind, role = _mcp_resolve_sketch_plane(doc, body, {plane!r})
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Sketch")
 try:
     sketch_name = {name!r} or "Sketch"
 
-    if {body_name!r}:
-        body = doc.getObject({body_name!r})
-        if body is None:
-            raise ValueError("Body not found: " + repr({body_name!r}))
-
-        # Add sketch to body
+    if body is not None:
         sketch = body.newObject("Sketcher::SketchObject", sketch_name)
-
-        # Set support plane - FreeCAD 1.x uses AttachmentSupport, older versions use Support
-        # Check which property exists and use the appropriate one
-        plane = {plane!r}
-        if plane in ["XY_Plane", "XZ_Plane", "YZ_Plane"]:
-            plane_obj = body.Origin.getObject(plane)
-            if hasattr(sketch, "AttachmentSupport"):
-                sketch.AttachmentSupport = [(plane_obj, "")]
-            else:
-                sketch.Support = (plane_obj, [""])
-            sketch.MapMode = "FlatFace"
-        elif plane.startswith("Face"):
-            # Attach to face
-            if hasattr(sketch, "AttachmentSupport"):
-                sketch.AttachmentSupport = [(body, plane)]
-            else:
-                sketch.Support = (body, [plane])
-            sketch.MapMode = "FlatFace"
     else:
-        # Standalone sketch
         sketch = doc.addObject("Sketcher::SketchObject", sketch_name)
 
-        plane = {plane!r}
-        if plane == "XY_Plane":
-            sketch.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(0,0,0,1))
-        elif plane == "XZ_Plane":
-            sketch.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(FreeCAD.Vector(1,0,0), 90))
-        elif plane == "YZ_Plane":
-            sketch.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(FreeCAD.Vector(0,1,0), 90))
+    if support is not None:
+        # FreeCAD 1.x uses AttachmentSupport, older versions use Support
+        if hasattr(sketch, "AttachmentSupport"):
+            sketch.AttachmentSupport = [(support, sub_element)]
+        else:
+            sketch.Support = (support, [sub_element])
+        sketch.MapMode = "FlatFace"
+    elif role == "XY_Plane":
+        sketch.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(0,0,0,1))
+    elif role == "XZ_Plane":
+        sketch.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(FreeCAD.Vector(1,0,0), 90))
+    elif role == "YZ_Plane":
+        sketch.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(FreeCAD.Vector(0,1,0), 90))
 
     doc.recompute()
+    if support is not None and "Invalid" in sketch.State:
+        raise ValueError(
+            "Sketch could not attach to " + repr(support.Name)
+            + ((" " + sub_element) if sub_element else "") + ": "
+            + str(sketch.getStatusString())
+        )
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
     raise
 
+_placement = sketch.getGlobalPlacement()
+_normal = _placement.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
 _result_ = {{
     "name": sketch.Name,
     "label": sketch.Label,
     "type_id": sketch.TypeId,
     "support": str(sketch.AttachmentSupport) if hasattr(sketch, "AttachmentSupport") else (str(sketch.Support) if hasattr(sketch, "Support") else None),
+    "attached_to": None if support is None else {{
+        "name": support.Name,
+        "label": support.Label,
+        "type_id": support.TypeId,
+        "role": role,
+        "sub_element": sub_element or None,
+    }},
+    "attachment_kind": kind,
+    "map_mode": sketch.MapMode,
+    "origin": [round(_placement.Base.x, 9), round(_placement.Base.y, 9), round(_placement.Base.z, 9)],
+    "normal": [round(_normal.x, 9), round(_normal.y, 9), round(_normal.z, 9)],
 }}
 """
+        )
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
