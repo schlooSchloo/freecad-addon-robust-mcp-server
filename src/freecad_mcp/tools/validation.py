@@ -10,6 +10,7 @@ may fail or create invalid geometry.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from freecad_mcp.bridge.object_health import OBJECT_HEALTH_HELPERS
 from freecad_mcp.tools._registration import unsafe_tool
 
 
@@ -36,7 +37,11 @@ def register_validation_tools(
 
         This tool inspects an object to determine if it is in a valid state,
         has any computation errors, or needs recomputation. Use this after
-        performing operations to verify they succeeded.
+        performing operations to verify they succeeded. When FreeCAD marks the
+        object as failed, its own error message is included. Links whose
+        target file, document or object is missing are reported as
+        unresolved. Sketches with only construction or external (projected)
+        geometry are valid references with no output geometry, not failures.
 
         Args:
             object_name: Name of the object to validate.
@@ -44,15 +49,34 @@ def register_validation_tools(
 
         Returns:
             Dictionary containing:
-                - valid: Overall validity (True if shape is valid and no errors)
+                - valid: False if FreeCAD reports an error, the shape is
+                  invalid, or a link target can't be found
                 - object_name: Name of the validated object
-                - shape_valid: Whether the shape geometry is valid
-                - has_errors: Whether the object has error states
+                - label: Object label
+                - type_id: FreeCAD type identifier
+                - classification: "ok", "error", "invalid_shape",
+                  "unresolved_link", "reference_only" (sketch with no
+                  output geometry), "no_shape" or "not_found"
+                - shape_valid: Whether the shape geometry is valid, or None
+                  when there is no shape (missing or null) to check
+                - has_shape / shape_null: Whether the object has a shape
+                  property, and whether that shape is null (empty)
+                - output_geometry: Whether the object produces geometry
+                - unbounded: True for infinite shapes (datum planes, lines)
+                - has_errors: Whether FreeCAD marked the object as failed
+                - status_message: FreeCAD's own error message, or None
                 - state: List of state flags (e.g., ["Invalid", "Touched"])
                 - recompute_needed: Whether recomputation is needed
-                - volume: Shape volume if applicable (None otherwise)
-                - area: Shape surface area if applicable (None otherwise)
-                - error_messages: List of any error messages
+                - volume: Total volume of the solids (None if no solids or
+                  unbounded)
+                - area: Shape surface area (None if no shape or unbounded)
+                - sketch_geometry: For sketches, counts of normal,
+                  construction and external geometry (None otherwise)
+                - link_problems: Unresolved links, each with property,
+                  problem ("no_target", "missing_file", "document_not_open",
+                  "missing_object", "not_restored"), message and, where
+                  known, linked_object, linked_file and linked_document
+                - error_messages: Error messages, starting with FreeCAD's own
                 - warnings: List of any warnings
 
         Example:
@@ -64,7 +88,9 @@ def register_validation_tools(
         """
         bridge = await get_bridge()
 
-        code = f"""
+        code = (
+            OBJECT_HEALTH_HELPERS
+            + f"""
 import FreeCAD
 
 doc_name = {doc_name!r}
@@ -76,95 +102,42 @@ if doc_name:
 else:
     doc = FreeCAD.ActiveDocument
 
-if doc is None:
-    _result_ = {{
+def _not_found(message):
+    return {{
         "valid": False,
         "object_name": object_name,
-        "error_messages": ["No active document found"],
-        "shape_valid": False,
+        "error_messages": [message],
+        "shape_valid": None,
         "has_errors": True,
         "state": [],
         "recompute_needed": False,
         "volume": None,
         "area": None,
-        "warnings": []
+        "warnings": [],
+        "classification": "not_found",
     }}
+
+if doc is None:
+    _result_ = _not_found("No active document found")
 else:
     obj = doc.getObject(object_name)
     if obj is None:
-        _result_ = {{
-            "valid": False,
-            "object_name": object_name,
-            "error_messages": [f"Object '{{object_name}}' not found in document '{{doc.Name}}'"],
-            "shape_valid": False,
-            "has_errors": True,
-            "state": [],
-            "recompute_needed": False,
-            "volume": None,
-            "area": None,
-            "warnings": []
-        }}
+        _result_ = _not_found(
+            f"Object '{{object_name}}' not found in document '{{doc.Name}}'"
+        )
     else:
-        # Check object state
-        state = list(obj.State) if hasattr(obj, 'State') else []
-        has_errors = "Invalid" in state or "Error" in state
-        recompute_needed = "Touched" in state
-
-        # Check shape validity
-        shape_valid = False
-        volume = None
-        area = None
-        warnings = []
-        error_messages = []
-
-        if hasattr(obj, 'Shape') and obj.Shape:
-            try:
-                shape_valid = obj.Shape.isValid()
-                if not shape_valid:
-                    error_messages.append("Shape geometry is invalid")
-
-                # Get volume if shape is a solid
-                if hasattr(obj.Shape, 'Volume'):
-                    volume = obj.Shape.Volume
-                    if volume <= 0:
-                        warnings.append(f"Shape has non-positive volume: {{volume}}")
-
-                # Get surface area
-                if hasattr(obj.Shape, 'Area'):
-                    area = obj.Shape.Area
-
-            except Exception as e:
-                error_messages.append(f"Error checking shape: {{str(e)}}")
-                shape_valid = False
-        else:
-            # Not all objects have shapes (e.g., Sketch, Body container)
-            # This is not necessarily an error
-            if obj.TypeId.startswith("Part::") or obj.TypeId.startswith("PartDesign::"):
-                if not obj.TypeId.endswith("Body"):
-                    warnings.append("Object has no shape")
-            shape_valid = True  # Objects without shapes are considered valid
+        check = _mcp_check_object(obj)
+        warnings = check["warnings"]
 
         # Check for PartDesign-specific issues
         if hasattr(obj, 'BaseFeature') and obj.BaseFeature is None:
             if obj.TypeId not in ["PartDesign::Body", "Sketcher::SketchObject"]:
                 warnings.append("PartDesign feature has no base feature")
 
-        # Overall validity
-        valid = shape_valid and not has_errors
-
-        _result_ = {{
-            "valid": valid,
-            "object_name": obj.Name,
-            "shape_valid": shape_valid,
-            "has_errors": has_errors,
-            "state": state,
-            "recompute_needed": recompute_needed,
-            "volume": volume,
-            "area": area,
-            "error_messages": error_messages,
-            "warnings": warnings
-        }}
+        check["object_name"] = check.pop("name")
+        _result_ = check
 """
+        )
         result = await bridge.execute_python(code)
         if result.success and result.result:
             return result.result
@@ -172,7 +145,7 @@ else:
             "valid": False,
             "object_name": object_name,
             "error_messages": [result.error_traceback or "Validation failed"],
-            "shape_valid": False,
+            "shape_valid": None,
             "has_errors": True,
             "state": [],
             "recompute_needed": False,
@@ -187,8 +160,9 @@ else:
     ) -> dict[str, Any]:
         """Check the health of all objects in a FreeCAD document.
 
-        This tool validates every object in the document and provides
-        a summary of the document's overall health. Use this after
+        This tool validates every object in the document (see
+        validate_object for the rules) and provides a summary of the
+        document's overall health, with FreeCAD's own error messages. Use this after
         complex operations or before saving/exporting.
 
         Args:
@@ -204,7 +178,17 @@ else:
                 - objects_with_errors: List of names with error states
                 - objects_needing_recompute: List of objects that need recompute
                 - recompute_needed: Whether document needs recomputation
-                - summary: Human-readable summary of document health
+                - summary: Human-readable summary of document health,
+                  including FreeCAD's error messages for the first problems
+                - problems: Up to 50 objects that are not valid, each with
+                  name, label, type_id, classification, state,
+                  status_message (FreeCAD's own error text), error_messages
+                  and link_problems (see validate_object)
+                - problems_truncated: True if more problems exist than listed
+                - unresolved_links: Names of objects with link targets that
+                  can't be found (missing file, document or object)
+                - reference_only_objects: Sketches with only construction or
+                  external geometry; valid, but they produce no geometry
 
         Example:
             Check document health before saving::
@@ -217,10 +201,13 @@ else:
         """
         bridge = await get_bridge()
 
-        code = f"""
+        code = (
+            OBJECT_HEALTH_HELPERS
+            + f"""
 import FreeCAD
 
 doc_name = {doc_name!r}
+_problem_limit = 50
 
 # Get document
 if doc_name:
@@ -238,7 +225,11 @@ if doc is None:
         "objects_with_errors": [],
         "objects_needing_recompute": [],
         "recompute_needed": False,
-        "summary": "No active document found"
+        "summary": "No active document found",
+        "problems": [],
+        "problems_truncated": False,
+        "unresolved_links": [],
+        "reference_only_objects": [],
     }}
 else:
     total_objects = len(doc.Objects)
@@ -246,35 +237,43 @@ else:
     invalid_objects = []
     objects_with_errors = []
     objects_needing_recompute = []
+    unresolved_links = []
+    reference_only = []
+    problems = []
+    problem_count = 0
 
     for obj in doc.Objects:
-        is_valid = True
+        check = _mcp_check_object(obj)
 
-        # Check state
-        state = list(obj.State) if hasattr(obj, 'State') else []
-
-        if "Invalid" in state or "Error" in state:
+        if check["has_errors"]:
             objects_with_errors.append(obj.Name)
-            is_valid = False
-
-        if "Touched" in state:
+        if check["shape_valid"] is False:
+            invalid_objects.append(obj.Name)
+        if check["link_problems"]:
+            unresolved_links.append(obj.Name)
+        if check["recompute_needed"]:
             objects_needing_recompute.append(obj.Name)
+        if check["classification"] == "reference_only":
+            reference_only.append(obj.Name)
 
-        # Check shape validity for objects that should have shapes
-        if hasattr(obj, 'Shape') and obj.Shape:
-            try:
-                if not obj.Shape.isValid():
-                    invalid_objects.append(obj.Name)
-                    is_valid = False
-            except Exception:
-                invalid_objects.append(obj.Name)
-                is_valid = False
-
-        if is_valid:
+        if check["valid"]:
             valid_count += 1
+        else:
+            problem_count += 1
+            if len(problems) < _problem_limit:
+                problems.append({{
+                    "name": obj.Name,
+                    "label": check["label"],
+                    "type_id": check["type_id"],
+                    "classification": check["classification"],
+                    "state": check["state"],
+                    "status_message": check["status_message"],
+                    "error_messages": check["error_messages"],
+                    "link_problems": check["link_problems"],
+                }})
 
     # Build summary
-    if valid_count == total_objects and not objects_with_errors:
+    if valid_count == total_objects:
         summary = f"Document '{{doc.Name}}' is healthy: all {{total_objects}} objects are valid"
     else:
         issues = []
@@ -282,14 +281,25 @@ else:
             issues.append(f"{{len(invalid_objects)}} invalid objects")
         if objects_with_errors:
             issues.append(f"{{len(objects_with_errors)}} objects with errors")
+        if unresolved_links:
+            issues.append(f"{{len(unresolved_links)}} unresolved links")
         if objects_needing_recompute:
             issues.append(f"{{len(objects_needing_recompute)}} objects need recompute")
         summary = f"Document '{{doc.Name}}' has issues: " + ", ".join(issues)
-
-    overall_valid = (valid_count == total_objects) and not objects_with_errors
+        details = [
+            p["name"] + ": " + (p["error_messages"][0] if p["error_messages"] else p["classification"])
+            for p in problems[:5]
+        ]
+        if details:
+            summary += ". " + "; ".join(details)
+    if reference_only:
+        summary += (
+            f". {{len(reference_only)}} sketch(es) have no output geometry "
+            "(reference only, not an error)"
+        )
 
     _result_ = {{
-        "valid": overall_valid,
+        "valid": valid_count == total_objects,
         "doc_name": doc.Name,
         "total_objects": total_objects,
         "valid_objects": valid_count,
@@ -297,9 +307,14 @@ else:
         "objects_with_errors": objects_with_errors,
         "objects_needing_recompute": objects_needing_recompute,
         "recompute_needed": len(objects_needing_recompute) > 0,
-        "summary": summary
+        "summary": summary,
+        "problems": problems,
+        "problems_truncated": problem_count > len(problems),
+        "unresolved_links": unresolved_links,
+        "reference_only_objects": reference_only,
     }}
 """
+        )
         result = await bridge.execute_python(code)
         if result.success and result.result:
             return result.result
@@ -323,6 +338,8 @@ else:
 
         This tool first validates all objects in the document. If any objects
         are invalid or have errors, it automatically performs an undo operation.
+        Sketches with no output geometry and objects without a shape do not
+        count as invalid.
         Use this after risky operations to ensure the model stays in a valid state.
 
         Args:
@@ -334,6 +351,8 @@ else:
                 - undone: Whether an undo operation was performed
                 - invalid_objects: List of invalid objects found (before undo)
                 - objects_with_errors: List of objects with errors (before undo)
+                - problems: Failed objects (before undo), each with name and
+                  error_messages (FreeCAD's own error text first)
                 - message: Human-readable description of what happened
                 - validation_after: Validation result after undo (if performed)
 
@@ -347,7 +366,9 @@ else:
         """
         bridge = await get_bridge()
 
-        code = f"""
+        code = (
+            OBJECT_HEALTH_HELPERS
+            + f"""
 import FreeCAD
 
 doc_name = {doc_name!r}
@@ -357,6 +378,20 @@ if doc_name:
     doc = FreeCAD.getDocument(doc_name)
 else:
     doc = FreeCAD.ActiveDocument
+
+def _scan(doc):
+    # Only failures FreeCAD reports, or invalid shapes, count: a sketch
+    # with no output geometry or an object without a shape is not a failure.
+    invalid, errors, problems = [], [], []
+    for obj in doc.Objects:
+        check = _mcp_check_object(obj)
+        if check["has_errors"]:
+            errors.append(obj.Name)
+        if check["shape_valid"] is False:
+            invalid.append(obj.Name)
+        if (check["has_errors"] or check["shape_valid"] is False) and len(problems) < 50:
+            problems.append({{"name": obj.Name, "error_messages": check["error_messages"]}})
+    return invalid, errors, problems
 
 if doc is None:
     _result_ = {{
@@ -369,21 +404,7 @@ if doc is None:
     }}
 else:
     # First, check current state
-    invalid_objects = []
-    objects_with_errors = []
-
-    for obj in doc.Objects:
-        state = list(obj.State) if hasattr(obj, 'State') else []
-
-        if "Invalid" in state or "Error" in state:
-            objects_with_errors.append(obj.Name)
-
-        if hasattr(obj, 'Shape') and obj.Shape:
-            try:
-                if not obj.Shape.isValid():
-                    invalid_objects.append(obj.Name)
-            except Exception:
-                invalid_objects.append(obj.Name)
+    invalid_objects, objects_with_errors, problems = _scan(doc)
 
     was_valid = len(invalid_objects) == 0 and len(objects_with_errors) == 0
 
@@ -393,6 +414,7 @@ else:
             "undone": False,
             "invalid_objects": [],
             "objects_with_errors": [],
+            "problems": [],
             "message": "Document is valid, no undo needed",
             "validation_after": None
         }}
@@ -404,21 +426,7 @@ else:
             undone = True
 
             # Re-validate after undo
-            invalid_after = []
-            errors_after = []
-
-            for obj in doc.Objects:
-                state = list(obj.State) if hasattr(obj, 'State') else []
-
-                if "Invalid" in state or "Error" in state:
-                    errors_after.append(obj.Name)
-
-                if hasattr(obj, 'Shape') and obj.Shape:
-                    try:
-                        if not obj.Shape.isValid():
-                            invalid_after.append(obj.Name)
-                    except Exception:
-                        invalid_after.append(obj.Name)
+            invalid_after, errors_after, problems_after = _scan(doc)
 
             valid_after = len(invalid_after) == 0 and len(errors_after) == 0
 
@@ -430,7 +438,8 @@ else:
             validation_after = {{
                 "valid": valid_after,
                 "invalid_objects": invalid_after,
-                "objects_with_errors": errors_after
+                "objects_with_errors": errors_after,
+                "problems": problems_after
             }}
 
         except Exception as e:
@@ -443,10 +452,12 @@ else:
             "undone": undone,
             "invalid_objects": invalid_objects,
             "objects_with_errors": objects_with_errors,
+            "problems": problems,
             "message": message,
             "validation_after": validation_after
         }}
 """
+        )
         result = await bridge.execute_python(code)
         if result.success and result.result:
             return result.result
@@ -493,7 +504,9 @@ else:
                 - rolled_back: Whether rollback was performed, or None if unknown
                 - execution_success: Execution outcome, or None if unknown
                 - execution_error: Any execution error message
-                - validation: Validation results (if validate_after is True)
+                - validation: Validation results (if validate_after is True),
+                  with error_messages mapping each failed object to
+                  FreeCAD's own error text
                 - message: Human-readable summary
 
         Example:
@@ -585,15 +598,24 @@ else:
         invalid_objects = []
         objects_with_errors = []
 
+        error_messages = {{}}
+
         for obj in doc.Objects:
             state = list(obj.State) if hasattr(obj, 'State') else []
 
             if "Invalid" in state or "Error" in state:
                 objects_with_errors.append(obj.Name)
-
-            if hasattr(obj, 'Shape') and obj.Shape:
                 try:
-                    if not obj.Shape.isValid():
+                    error_messages[obj.Name] = str(obj.getStatusString())[:1000]
+                except Exception:
+                    pass
+
+            # A null shape (e.g. a sketch with only external geometry) has
+            # nothing to check and is not a failure.
+            shape = getattr(obj, 'Shape', None)
+            if shape is not None and not (hasattr(shape, 'isNull') and shape.isNull()):
+                try:
+                    if not shape.isValid():
                         invalid_objects.append(obj.Name)
                 except Exception:
                     invalid_objects.append(obj.Name)
@@ -602,7 +624,8 @@ else:
         validation = {{
             "valid": validation_passed,
             "invalid_objects": invalid_objects,
-            "objects_with_errors": objects_with_errors
+            "objects_with_errors": objects_with_errors,
+            "error_messages": error_messages
         }}
 
     # Determine if we need to rollback

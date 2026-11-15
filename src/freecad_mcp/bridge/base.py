@@ -138,6 +138,8 @@ class ObjectInfo:
         children: List of child object names (OutList).
         parents: List of parent object names (InList).
         visibility: Whether object is visible in the view.
+        properties_truncated: Whether property names or values were
+            shortened or left out to keep the result small.
     """
 
     name: str
@@ -148,6 +150,7 @@ class ObjectInfo:
     children: list[str] = field(default_factory=list)
     parents: list[str] = field(default_factory=list)
     visibility: bool = True
+    properties_truncated: bool = False
 
 
 @dataclass
