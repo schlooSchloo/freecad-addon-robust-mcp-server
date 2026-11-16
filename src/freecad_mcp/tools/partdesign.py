@@ -341,6 +341,11 @@ _result_ = {{
                 - name: Pad name
                 - label: Pad label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -364,6 +369,9 @@ if body is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Pad Sketch")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     pad_name = {name!r} or "Pad"
     pad = body.newObject("PartDesign::Pad", pad_name)
     pad.Profile = sketch
@@ -382,6 +390,8 @@ try:
     pad.Reversed = {reversed}
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -391,7 +401,14 @@ _result_ = {{
     "name": pad.Name,
     "label": pad.Label,
     "type_id": pad.TypeId,
+    "volume_before": volume_before,
+    "volume_after": volume_after,
+    "volume_change": volume_change,
 }}
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Pad added no material. The profile may lie entirely inside the existing solid, or the direction may point the wrong way. Check the sketch placement and try reversed or symmetric.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -435,6 +452,7 @@ _result_ = {{
                 - volume_before: Body volume before the pocket
                 - volume_after: Body volume after the pocket
                 - volume_removed: Material removed (volume_before - volume_after)
+                - volume_change: volume_after - volume_before
                 - warning: Present only when the pocket removed no material, so a
                     caller can tell a no-op cut from a real one
         """
@@ -505,6 +523,7 @@ _result_ = {{
     "type_id": pocket.TypeId,
     "volume_before": volume_before,
     "volume_after": volume_after,
+    "volume_change": -volume_removed,
     "volume_removed": volume_removed,
 }}
 if abs(volume_removed) < 1e-6:
@@ -542,6 +561,11 @@ if abs(volume_removed) < 1e-6:
                 - name: Fillet name
                 - label: Fillet label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -568,6 +592,9 @@ selected_edges = {edges_param!r}
 # Wrap in transaction for undo support
 doc.openTransaction("Fillet Edges")
 try:
+    doc.recompute()
+    volume_before = obj.Shape.Volume if hasattr(obj, "Shape") and not obj.Shape.isNull() else 0.0
+
     fillet_name = {name!r} or "Fillet"
 
     if body:
@@ -588,6 +615,8 @@ try:
         fillet.Edges = edge_list
 
     doc.recompute()
+    volume_after = fillet.Shape.Volume if hasattr(fillet, "Shape") and not fillet.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -597,7 +626,14 @@ _result_ = {{
     "name": fillet.Name,
     "label": fillet.Label,
     "type_id": fillet.TypeId,
+    "volume_before": volume_before,
+    "volume_after": volume_after,
+    "volume_change": volume_change,
 }}
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Fillet did not change the volume. Check that the selected edges or faces are valid for this operation.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -627,6 +663,11 @@ _result_ = {{
                 - name: Chamfer name
                 - label: Chamfer label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -653,6 +694,9 @@ selected_edges = {edges_param!r}
 # Wrap in transaction for undo support
 doc.openTransaction("Chamfer Edges")
 try:
+    doc.recompute()
+    volume_before = obj.Shape.Volume if hasattr(obj, "Shape") and not obj.Shape.isNull() else 0.0
+
     chamfer_name = {name!r} or "Chamfer"
 
     if body:
@@ -673,6 +717,8 @@ try:
         chamfer.Edges = edge_list
 
     doc.recompute()
+    volume_after = chamfer.Shape.Volume if hasattr(chamfer, "Shape") and not chamfer.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -682,7 +728,14 @@ _result_ = {{
     "name": chamfer.Name,
     "label": chamfer.Label,
     "type_id": chamfer.TypeId,
+    "volume_before": volume_before,
+    "volume_after": volume_after,
+    "volume_change": volume_change,
 }}
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Chamfer did not change the volume. Check that the selected edges or faces are valid for this operation.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -722,6 +775,11 @@ _result_ = {{
                 - name: Revolution name
                 - label: Revolution label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -745,6 +803,9 @@ if body is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Revolution Sketch")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     rev_name = {name!r} or "Revolution"
     rev = body.newObject("PartDesign::Revolution", rev_name)
     rev.Profile = sketch
@@ -784,6 +845,8 @@ try:
             rev.ReferenceAxis = (sketch, ["H_Axis"])
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -793,7 +856,14 @@ _result_ = {{
     "name": rev.Name,
     "label": rev.Label,
     "type_id": rev.TypeId,
+    "volume_before": volume_before,
+    "volume_after": volume_after,
+    "volume_change": volume_change,
 }}
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Revolution added no material. The profile may lie entirely inside the existing solid, or the direction may point the wrong way. Check the sketch placement and try reversed or symmetric.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -833,6 +903,12 @@ _result_ = {{
                 - name: Groove name
                 - label: Groove label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - volume_removed: Material removed (-volume_change)
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -856,6 +932,9 @@ if body is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Groove Sketch")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     groove_name = {name!r} or "Groove"
     groove = body.newObject("PartDesign::Groove", groove_name)
     groove.Profile = sketch
@@ -895,6 +974,8 @@ try:
             groove.ReferenceAxis = (sketch, ["H_Axis"])
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -904,7 +985,15 @@ _result_ = {{
     "name": groove.Name,
     "label": groove.Label,
     "type_id": groove.TypeId,
+    "volume_before": volume_before,
+    "volume_after": volume_after,
+    "volume_change": volume_change,
+    "volume_removed": -volume_change,
 }}
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Groove removed no material. The profile may miss the solid, or the direction may point away from it. Check the sketch placement and try reversed or symmetric.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -1444,6 +1533,11 @@ _result_ = {{
                 - name: Loft name
                 - label: Loft label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -1474,6 +1568,9 @@ if body is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Loft Sketches")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     loft_name = {name!r} or "Loft"
     loft = body.newObject("PartDesign::AdditiveLoft", loft_name)
     loft.Profile = sketches[0]
@@ -1482,6 +1579,8 @@ try:
     loft.Closed = {closed}
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -1491,7 +1590,14 @@ _result_ = {{
     "name": loft.Name,
     "label": loft.Label,
     "type_id": loft.TypeId,
+    "volume_before": volume_before,
+    "volume_after": volume_after,
+    "volume_change": volume_change,
 }}
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Loft added no material. The profile may lie entirely inside the existing solid, or the direction may point the wrong way. Check the sketch placement and try reversed or symmetric.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -1525,6 +1631,11 @@ _result_ = {{
                 - name: Sweep name
                 - label: Sweep label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -1564,6 +1675,9 @@ if body is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Sweep Sketch")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     sweep_name = {name!r} or "Sweep"
     sweep = body.newObject("PartDesign::AdditivePipe", sweep_name)
     sweep.Profile = profile
@@ -1571,6 +1685,8 @@ try:
     sweep.Transition = {transition_map[transition]}
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -1580,7 +1696,14 @@ _result_ = {{
     "name": sweep.Name,
     "label": sweep.Label,
     "type_id": sweep.TypeId,
+    "volume_before": volume_before,
+    "volume_after": volume_after,
+    "volume_change": volume_change,
 }}
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Sweep added no material. The profile may lie entirely inside the existing solid, or the direction may point the wrong way. Check the sketch placement and try reversed or symmetric.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -1828,6 +1951,11 @@ except Exception:
                 - name: Draft name
                 - label: Draft label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -1860,6 +1988,9 @@ selected_faces = {faces_param!r}
 # Wrap in transaction for undo support
 doc.openTransaction("Draft Feature")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     draft_name = {name!r} or "Draft"
     draft = body.newObject("PartDesign::Draft", draft_name)
 
@@ -1874,16 +2005,25 @@ try:
         draft.NeutralPlane = (plane_obj, "")
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 
     _result_ = {{
         "name": draft.Name,
         "label": draft.Label,
         "type_id": draft.TypeId,
+        "volume_before": volume_before,
+        "volume_after": volume_after,
+        "volume_change": volume_change,
     }}
 except Exception:
     doc.abortTransaction()
     raise
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Draft did not change the volume. Check that the selected edges or faces are valid for this operation.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -1915,6 +2055,11 @@ except Exception:
                 - name: Thickness name
                 - label: Thickness label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -1941,6 +2086,9 @@ if body is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Thickness Feature")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     thickness_name = {name!r} or "Thickness"
     thick = body.newObject("PartDesign::Thickness", thickness_name)
 
@@ -1950,16 +2098,25 @@ try:
     thick.Join = 0  # Arc join
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 
     _result_ = {{
         "name": thick.Name,
         "label": thick.Label,
         "type_id": thick.TypeId,
+        "volume_before": volume_before,
+        "volume_after": volume_after,
+        "volume_change": volume_change,
     }}
 except Exception:
     doc.abortTransaction()
     raise
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Thickness did not change the volume. Check that the selected edges or faces are valid for this operation.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -1992,6 +2149,12 @@ except Exception:
                 - name: Loft name
                 - label: Loft label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - volume_removed: Material removed (-volume_change)
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -2024,6 +2187,9 @@ if body is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Subtractive Loft")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     loft_name = {name!r} or "SubtractiveLoft"
     loft = body.newObject("PartDesign::SubtractiveLoft", loft_name)
     loft.Profile = sketches[0]
@@ -2032,16 +2198,26 @@ try:
     loft.Closed = {closed}
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 
     _result_ = {{
         "name": loft.Name,
         "label": loft.Label,
         "type_id": loft.TypeId,
+        "volume_before": volume_before,
+        "volume_after": volume_after,
+        "volume_change": volume_change,
+        "volume_removed": -volume_change,
     }}
 except Exception:
     doc.abortTransaction()
     raise
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Subtractive loft removed no material. The profile may miss the solid, or the direction may point away from it. Check the sketch placement and try reversed or symmetric.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
@@ -2073,6 +2249,12 @@ except Exception:
                 - name: Pipe name
                 - label: Pipe label
                 - type_id: Object type
+                - volume_before: Volume before the feature (mm^3)
+                - volume_after: Volume after the feature (mm^3)
+                - volume_change: volume_after - volume_before
+                - volume_removed: Material removed (-volume_change)
+                - warning: Present only when the volume did not change, so a
+                    caller can tell a no-op feature from a real one
         """
         bridge = await get_bridge()
 
@@ -2112,6 +2294,9 @@ if body is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Subtractive Pipe")
 try:
+    doc.recompute()
+    volume_before = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+
     pipe_name = {name!r} or "SubtractivePipe"
     pipe = body.newObject("PartDesign::SubtractivePipe", pipe_name)
     pipe.Profile = profile
@@ -2119,16 +2304,26 @@ try:
     pipe.Transition = {transition_map[transition]}
 
     doc.recompute()
+    volume_after = body.Shape.Volume if hasattr(body, "Shape") and not body.Shape.isNull() else 0.0
+    volume_change = volume_after - volume_before
     doc.commitTransaction()
 
     _result_ = {{
         "name": pipe.Name,
         "label": pipe.Label,
         "type_id": pipe.TypeId,
+        "volume_before": volume_before,
+        "volume_after": volume_after,
+        "volume_change": volume_change,
+        "volume_removed": -volume_change,
     }}
 except Exception:
     doc.abortTransaction()
     raise
+if abs(volume_change) < 1e-6:
+    _result_["warning"] = (
+        'Subtractive pipe removed no material. The profile may miss the solid, or the direction may point away from it. Check the sketch placement and try reversed or symmetric.'
+    )
 """
         result = await bridge.execute_python(code)
         if result.success:
