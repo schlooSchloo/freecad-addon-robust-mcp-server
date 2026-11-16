@@ -45,6 +45,19 @@ ARGUMENT_OVERRIDES: dict[str, dict[str, Any]] = {
     # Job-defined output paths can't be reviewed, so the tool refuses them.
     "cam_post_process": {"use_job_output": False},
     "draft_text_on_surface": {"position": [0.0, 0.0]},
+    # Element names and sample options are checked before calling FreeCAD.
+    "get_shape_geometry": {
+        "elements": ["Edge1"],
+        "samples": 4,
+        "sample_tolerance": None,
+    },
+    "get_section_outline": {
+        "plane": "XY",
+        "origin": None,
+        "normal": None,
+        "samples": 4,
+        "sample_tolerance": None,
+    },
     "set_camera_position": {
         "position": [10.0, 0.0, 0.0],
         "look_at": [0.0, 0.0, 0.0],
