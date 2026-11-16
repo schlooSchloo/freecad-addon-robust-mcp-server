@@ -51,6 +51,12 @@ ARGUMENT_OVERRIDES: dict[str, dict[str, Any]] = {
         "up_vector": [0.0, 0.0, 1.0],
     },
     "set_view_angle": {"view_angle": "Isometric"},
+    # Moving and fixed objects must differ; excluded pairs must name them.
+    "sweep_clash": {
+        "moving": ["Arm"],
+        "fixed": ["Wall"],
+        "exclude_pairs": [["Arm", "Wall"]],
+    },
 }
 
 # Tools that answer without contacting FreeCAD.
