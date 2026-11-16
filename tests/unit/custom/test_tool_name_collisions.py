@@ -63,3 +63,21 @@ def test_module_labels_are_unique():
 
 def test_custom_labels_are_prefixed():
     assert all(spec.label.startswith("custom.") for spec in CUSTOM_TOOL_MODULES)
+
+
+def test_custom_modules_are_discovered_without_helpers():
+    labels = {spec.label for spec in CUSTOM_TOOL_MODULES}
+
+    assert "custom.status" in labels
+    assert not labels & {"custom.loader", "custom.runtime", "custom.shape_snippets"}
+
+
+def test_every_discovered_module_has_its_register_function():
+    import importlib
+
+    for spec in CUSTOM_TOOL_MODULES:
+        module = importlib.import_module(spec.module)
+        assert callable(getattr(module, spec.function, None)), (
+            f"{spec.module} needs a {spec.function}() function, or rename it "
+            "with a leading underscore if it is a helper module"
+        )
