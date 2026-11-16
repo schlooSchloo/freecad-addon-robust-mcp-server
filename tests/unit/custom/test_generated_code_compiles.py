@@ -15,7 +15,9 @@ Tools that use the bridge's higher-level methods (``create_object``,
 bridge. The code those bridge methods build is not covered here.
 
 If a new tool fails because it rejected a sample value before calling the
-bridge, add arguments that it accepts to ARGUMENT_OVERRIDES. If it never
+bridge, add arguments that it accepts to ARGUMENT_OVERRIDES (for a custom
+tool group, in its own ``compile_overrides_<group>.py`` beside this file,
+defining ``OVERRIDES``). If it never
 contacts FreeCAD, add it to NO_BRIDGE_TOOLS.
 
 Compiling only catches syntax errors, not names that are undefined at run
@@ -25,10 +27,12 @@ CUSTOM_CHANGES.md).
 """
 
 import enum
+import importlib.util
 import inspect
 import types
 import typing
 import warnings
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -45,19 +49,6 @@ ARGUMENT_OVERRIDES: dict[str, dict[str, Any]] = {
     # Job-defined output paths can't be reviewed, so the tool refuses them.
     "cam_post_process": {"use_job_output": False},
     "draft_text_on_surface": {"position": [0.0, 0.0]},
-    # Element names and sample options are checked before calling FreeCAD.
-    "get_shape_geometry": {
-        "elements": ["Edge1"],
-        "samples": 4,
-        "sample_tolerance": None,
-    },
-    "get_section_outline": {
-        "plane": "XY",
-        "origin": None,
-        "normal": None,
-        "samples": 4,
-        "sample_tolerance": None,
-    },
     "set_camera_position": {
         "position": [10.0, 0.0, 0.0],
         "look_at": [0.0, 0.0, 0.0],
@@ -65,6 +56,29 @@ ARGUMENT_OVERRIDES: dict[str, dict[str, Any]] = {
     },
     "set_view_angle": {"view_angle": "Isometric"},
 }
+
+
+def _load_group_overrides() -> dict[str, dict[str, Any]]:
+    """Merge overrides kept beside this file in ``compile_overrides_*.py``.
+
+    Each custom tool group keeps its own overrides in its own file, defining
+    ``OVERRIDES``, so separate pull requests never edit the same lines.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for path in sorted(Path(__file__).parent.glob("compile_overrides_*.py")):
+        spec = importlib.util.spec_from_file_location(f"_{path.stem}", path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for name, values in module.OVERRIDES.items():
+            assert name not in merged and name not in ARGUMENT_OVERRIDES, (
+                f"{name} has overrides in more than one place"
+            )
+            merged[name] = values
+    return merged
+
+
+ARGUMENT_OVERRIDES.update(_load_group_overrides())
 
 # Tools that answer without contacting FreeCAD.
 NO_BRIDGE_TOOLS: frozenset[str] = frozenset({"get_tool_registration_status"})
