@@ -68,7 +68,7 @@ our module loader needed no changes.
 
 ## 2. Structure and safety net
 
-### 2.1 `tools/custom/` package for our own tools (Done, FreeCAD side still to come)
+### 2.1 `tools/custom/` package for our own tools (Done)
 
 - New tools live in `src/freecad_mcp/tools/custom/`, split into modules by
   topic (e.g. `binders.py`, `datums.py`, `clash.py`), not one large file.
@@ -84,14 +84,22 @@ our module loader needed no changes.
   `_robust_mcp_cam_dispatch`.
 - Tests go in `tests/unit/custom/` and `tests/integration/custom/`.
 - The FreeCAD-side code ships inside the workbench addon, like
-  `cam_runtime.py`, in its own module (e.g.
-  `freecad/RobustMCPBridge/freecad_mcp_bridge/custom/`). Keep the hook into
-  the bridge to a single line there too. Not created yet: the first custom
-  tool that needs FreeCAD-side code will add it.
-- Use a versioned dispatcher like CAM's (`CAM_API_VERSION`), so a server
-  newer than the installed workbench gives a clear "update the workbench"
-  error instead of a confusing failure. Changing this code means
-  reinstalling the workbench and restarting FreeCAD.
+  `cam_runtime.py`, in the package
+  `freecad/RobustMCPBridge/freecad_mcp_bridge/custom_runtime/`. Each module
+  there that defines an `OPERATIONS` dictionary is picked up automatically,
+  so tool groups never edit a shared list. A module that fails to import is
+  skipped and named in the error for its operations.
+- The bridge puts `_p3d_dispatch` into every execution environment: one
+  method and one line in `freecad_mcp_bridge/server.py`, our only edit to the
+  bridge. Server-side tools call it through `tools/custom/runtime.py`
+  (`run_operation`), which sends the arguments as JSON, so model text never
+  becomes code.
+- The dispatcher is versioned (`P3D_API_VERSION`, like CAM's
+  `CAM_API_VERSION`), so a server newer than the installed workbench gives a
+  clear "update the workbench" error instead of a confusing failure.
+  Changing this code means reinstalling the workbench and restarting FreeCAD.
+- Embedded mode (Linux only) doesn't load the custom runtime; custom tools
+  there report that they need the workbench.
 - Custom tools are documented in their docstrings and in this file. We don't
   add them to upstream's tool lists (`freecad://capabilities`,
   `prompts/freecad.py`, `docs/guide/tools.md`), to avoid merge conflicts. The

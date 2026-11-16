@@ -1535,6 +1535,18 @@ class FreecadMCPPlugin:
 
             return standalone_dispatch(version, operation, args)
 
+    @staticmethod
+    def _p3d_dispatch(version: int, operation: str, args: dict[str, Any]) -> Any:
+        """Load the fork's custom runtime only when it is requested."""
+        if __package__:
+            from .custom_runtime import dispatch
+
+            return dispatch(version, operation, args)
+        else:
+            from custom_runtime import dispatch as standalone_dispatch
+
+            return standalone_dispatch(version, operation, args)
+
     def _execute_code_sync(
         self,
         code: str | bytes,
@@ -1559,6 +1571,7 @@ class FreecadMCPPlugin:
         exec_globals: dict[str, Any] = {
             "__builtins__": __builtins__,
             "_robust_mcp_cam_dispatch": self._cam_dispatch,
+            "_p3d_dispatch": self._p3d_dispatch,
         }
 
         if initial_globals is not None:
