@@ -62,6 +62,7 @@ class ViewAngle(str, Enum):
     LEFT = "Left"
     RIGHT = "Right"
     FIT_ALL = "FitAll"
+    CURRENT = "Current"
 
 
 class ObjectType(str, Enum):
@@ -138,6 +139,8 @@ class ObjectInfo:
         children: List of child object names (OutList).
         parents: List of parent object names (InList).
         visibility: Whether object is visible in the view.
+        properties_truncated: Whether property names or values were
+            shortened or left out to keep the result small.
     """
 
     name: str
@@ -148,6 +151,7 @@ class ObjectInfo:
     children: list[str] = field(default_factory=list)
     parents: list[str] = field(default_factory=list)
     visibility: bool = True
+    properties_truncated: bool = False
 
 
 @dataclass
@@ -193,6 +197,10 @@ class ScreenshotResult:
         height: Image height in pixels.
         view_angle: The view angle used.
         error: Error message if failed.
+        fit: Whether all objects were fitted into the view before capture.
+        doc_name: Name of the captured document.
+        camera: The camera used for the capture (see bridge.view3d.camera_info).
+        note: Extra information, e.g. that a non-active 3D view was used.
     """
 
     success: bool
@@ -202,6 +210,10 @@ class ScreenshotResult:
     height: int = 0
     view_angle: ViewAngle | None = None
     error: str | None = None
+    fit: bool = True
+    doc_name: str | None = None
+    camera: dict[str, Any] | None = None
+    note: str | None = None
 
 
 @dataclass
@@ -486,6 +498,7 @@ class FreecadBridge(ABC):
         *,
         include_properties: bool = True,
         include_shape: bool = True,
+        property_names: list[str] | None = None,
     ) -> ObjectInfo:
         """Get detailed object information.
 
@@ -494,6 +507,7 @@ class FreecadBridge(ABC):
             doc_name: Document name (uses active if None).
             include_properties: Read object property values.
             include_shape: Read shape geometry details.
+            property_names: Only read these properties (all if None).
 
         Returns:
             ObjectInfo with full object details.
@@ -529,18 +543,22 @@ class FreecadBridge(ABC):
         properties: dict[str, Any],
         doc_name: str | None = None,
     ) -> ObjectInfo:
-        """Edit object properties.
+        """Edit object properties in one undo step, all or nothing.
 
         Args:
             obj_name: Name of the object to edit.
-            properties: Property values to set.
+            properties: Property values to set. Link properties take object
+                names, a string starting with "=" sets an expression (see
+                ``freecad_mcp.bridge.object_editing``).
             doc_name: Document name (uses active if None).
 
         Returns:
-            Updated ObjectInfo.
+            Updated ObjectInfo whose ``properties`` hold the values FreeCAD
+            stored (an ``ObjectEditResult`` with ``notes``).
 
         Raises:
-            ValueError: If object not found.
+            ValueError: If the object or a property is not found, or a value
+                cannot be set. Nothing is changed in that case.
         """
 
     @abstractmethod
@@ -548,12 +566,20 @@ class FreecadBridge(ABC):
         self,
         obj_name: str,
         doc_name: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Delete an object.
+
+        If the object is a feature of a PartDesign body, the body is updated
+        first as the FreeCAD GUI does: the Tip moves back to the previous
+        feature and the next feature is rebuilt on the previous one.
 
         Args:
             obj_name: Name of the object to delete.
             doc_name: Document name (uses active if None).
+
+        Returns:
+            Report with ``deleted``, ``label``, ``notes`` and, for body
+            features, ``body``, ``tip`` and ``body_shape_valid``.
 
         Raises:
             ValueError: If object not found.
@@ -570,14 +596,17 @@ class FreecadBridge(ABC):
         width: int = 800,
         height: int = 600,
         doc_name: str | None = None,
+        fit: bool = True,
     ) -> ScreenshotResult:
-        """Capture a screenshot of the 3D view.
+        """Capture a screenshot of the document's 3D view.
 
         Args:
-            view_angle: View angle to set before capture.
+            view_angle: View angle to set before capture (Isometric if None;
+                FitAll and Current keep the orientation).
             width: Image width in pixels.
             height: Image height in pixels.
             doc_name: Document name (uses active if None).
+            fit: Whether to fit all objects in the view before capture.
 
         Returns:
             ScreenshotResult with image data or error.
@@ -589,11 +618,15 @@ class FreecadBridge(ABC):
         view_angle: ViewAngle,
         doc_name: str | None = None,
     ) -> None:
-        """Set the 3D view angle.
+        """Set the 3D view angle of a document's 3D view.
 
         Args:
             view_angle: View angle to set.
             doc_name: Document name (uses active if None).
+
+        Raises:
+            ValueError: The document or its 3D view does not exist, or
+                FreeCAD reported an error.
         """
 
     # =========================================================================

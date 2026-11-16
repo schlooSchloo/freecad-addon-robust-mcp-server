@@ -9,6 +9,20 @@ from typing import Any
 
 from freecad_mcp.tools._registration import file_tool
 
+# Generated-code helpers shared by the spreadsheet tools below. Cell values can be
+# FreeCAD Quantity objects (e.g. "=40mm"), which the bridge cannot serialise, so
+# they are turned into plain JSON values first.
+_PLAIN_VALUE_CODE = """
+def _plain_value(v):
+    if v is None or isinstance(v, (bool, int, str)):
+        return v
+    if isinstance(v, float):
+        return v if v == v and v not in (float("inf"), float("-inf")) else str(v)
+    if hasattr(v, "Value") and hasattr(v, "Unit") and hasattr(v, "UserString"):
+        return {"value": _plain_value(float(v.Value)), "unit": v.getUserPreferred()[2], "text": v.UserString}
+    return str(v)
+"""
+
 
 def register_spreadsheet_tools(
     mcp: Any, get_bridge: Callable[[], Awaitable[Any]]
@@ -110,6 +124,13 @@ except Exception:
 
         Values can be numbers, strings, or formulas. Formulas start with '='.
 
+        Text inside an expression is NOT written with quote marks. FreeCAD
+        expressions quote text with double angle brackets: ``<<`` and ``>>``.
+        For example ``=str(Body.Shape.Volume) + <<;>>``. A quote mark such as
+        ``";"`` breaks the expression. (A plain text value that does not start
+        with '=' needs no quoting at all.) Units work in formulas and plain
+        values: ``=40mm`` and ``40 mm`` both give a length of 40 mm.
+
         Args:
             spreadsheet_name: Name of the spreadsheet object.
             cell: Cell address (e.g., "A1", "B2", "C10").
@@ -124,7 +145,12 @@ except Exception:
                 - success: Whether the operation succeeded
                 - cell: Cell address that was set
                 - value: Value that was set
-                - computed: Computed value (for formulas)
+                - computed: Computed value, in a JSON-safe form. Numbers and
+                  text come back as is; a value with units (e.g. 40 mm) comes
+                  back as {"value": 40.0, "unit": "mm", "text": "40.00 mm"}.
+                  None if it could not be read back.
+                - computed_error: Only present if reading the computed value
+                  failed. The cell was still set; do not repeat the change.
 
         Raises:
             ValueError: If no document is found.
@@ -141,7 +167,9 @@ except Exception:
         """
         bridge = await get_bridge()
 
-        code = f"""
+        code = (
+            _PLAIN_VALUE_CODE
+            + f"""
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
@@ -163,13 +191,17 @@ try:
     sheet.set(cell, str(value))
     doc.recompute()
 
-    # Get the computed value
-    try:
-        computed = sheet.get(cell)
-    except Exception:
-        computed = value
-
     doc.commitTransaction()
+
+    # The cell is set and committed at this point. Reading the computed value
+    # back must never turn that into a reported failure (the caller could retry
+    # and apply the change twice), so problems here are reported separately.
+    computed = None
+    computed_error = None
+    try:
+        computed = _plain_value(sheet.get(cell))
+    except Exception as exc:
+        computed_error = str(exc)
 
     _result_ = {{
         "success": True,
@@ -177,10 +209,13 @@ try:
         "value": value,
         "computed": computed,
     }}
+    if computed_error is not None:
+        _result_["computed_error"] = computed_error
 except Exception:
     doc.abortTransaction()
     raise
 """
+        )
         result = await bridge.execute_python(code)
         if result.success and result.result:
             return result.result
@@ -203,13 +238,17 @@ except Exception:
             Dictionary with cell information:
                 - cell: Cell address
                 - value: Raw value (formula if it's a formula)
-                - computed: Computed/displayed value
-                - alias: Cell alias if set, None otherwise
+                - computed: Computed value in a JSON-safe form (a value with
+                  units comes back as {"value": 40.0, "unit": "mm",
+                  "text": "40.00 mm"}); None for an empty cell
+                - alias: Cell alias if set, None if the cell has no alias
+                - computed_error: Only present if the value could not be read
 
         Raises:
             ValueError: If no document is found.
             ValueError: If the spreadsheet object is not found.
-            ValueError: If retrieving cell data fails.
+            ValueError: If retrieving cell data or the alias fails (a failed
+                lookup is an error, never reported as "no alias").
 
         Example:
             Get a cell value::
@@ -219,7 +258,9 @@ except Exception:
         """
         bridge = await get_bridge()
 
-        code = f"""
+        code = (
+            _PLAIN_VALUE_CODE
+            + f"""
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
@@ -230,11 +271,13 @@ if sheet is None:
 
 cell = {cell!r}
 
-# Get computed value
+# Get computed value (None for an empty cell)
+computed_error = None
 try:
-    computed = sheet.get(cell)
-except Exception:
+    computed = _plain_value(sheet.get(cell))
+except Exception as exc:
     computed = None
+    computed_error = str(exc)
 
 # Get raw content (formula or value)
 try:
@@ -242,23 +285,11 @@ try:
 except Exception:
     content = None
 
-# Check for alias
-alias = None
-try:
-    # Get all aliases and check if this cell has one
-    aliases = sheet.getPropertyByName("cells").Content
-    # Parse XML to find alias - simplified approach
-    for prop_name in dir(sheet):
-        if not prop_name.startswith("_"):
-            try:
-                cell_prop = sheet.getCellFromAlias(prop_name)
-                if cell_prop == cell:
-                    alias = prop_name
-                    break
-            except Exception:
-                pass
-except Exception:
-    pass
+# Alias: use the spreadsheet's own lookup. None means "no alias"; a failure
+# raises instead of looking like "no alias".
+if not hasattr(sheet, "getAlias"):
+    raise ValueError("This FreeCAD version has no Spreadsheet.getAlias")
+alias = sheet.getAlias(cell) or None
 
 _result_ = {{
     "cell": cell,
@@ -266,7 +297,10 @@ _result_ = {{
     "computed": computed,
     "alias": alias,
 }}
+if computed_error is not None and content:
+    _result_["computed_error"] = computed_error
 """
+        )
         result = await bridge.execute_python(code)
         if result.success and result.result:
             return result.result
@@ -392,19 +426,19 @@ if sheet is None:
 
 aliases = {{}}
 
-# Get aliases by checking which properties are aliases
-# In FreeCAD, spreadsheet aliases become properties on the sheet object
-try:
-    # Method 1: Try getPropertyByName for each potential alias
+# Use the spreadsheet's own API: every used cell is asked for its alias, so an
+# alias is never missed and a failure raises instead of looking like "none".
+if hasattr(sheet, "getAlias") and hasattr(sheet, "getUsedCells"):
+    for used_cell in sheet.getUsedCells():
+        found = sheet.getAlias(used_cell)
+        if found:
+            aliases[found] = used_cell
+else:
+    # Older API without getAlias/getUsedCells: look each property up by alias.
     for prop_name in sheet.PropertiesList:
-        try:
-            cell = sheet.getCellFromAlias(prop_name)
-            if cell:
-                aliases[prop_name] = cell
-        except Exception:
-            pass
-except Exception:
-    pass
+        found_cell = sheet.getCellFromAlias(prop_name)
+        if found_cell:
+            aliases[prop_name] = found_cell
 
 _result_ = {{
     "spreadsheet": sheet.Name,

@@ -679,7 +679,7 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         {
                             "name": "inspect_object",
                             "description": "Get detailed info about an object",
-                            "key_params": ["object_name", "doc_name"],
+                            "key_params": ["object_name", "doc_name", "property_names"],
                         },
                         {
                             "name": "create_object",
@@ -780,13 +780,23 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "slice_shape",
-                            "description": "Slice object with a plane",
-                            "key_params": ["object_name", "plane"],
+                            "description": "Slice object with a plane; returns the outline",
+                            "key_params": [
+                                "object_name",
+                                "plane_point",
+                                "plane_normal",
+                                "max_edges",
+                            ],
                         },
                         {
                             "name": "section_shape",
-                            "description": "Get 2D section where plane intersects object",
-                            "key_params": ["object_name", "plane"],
+                            "description": "Get 2D section where plane intersects object; returns the outline",
+                            "key_params": [
+                                "object_name",
+                                "plane",
+                                "offset",
+                                "max_edges",
+                            ],
                         },
                         {
                             "name": "make_compound",
@@ -810,8 +820,8 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "extrude_shape",
-                            "description": "Extrude shape along vector",
-                            "key_params": ["object_name", "direction", "length"],
+                            "description": "Extrude shape along vector (parametric; solid from closed profiles)",
+                            "key_params": ["object_name", "direction", "solid"],
                         },
                         {
                             "name": "revolve_shape",
@@ -845,8 +855,8 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "scale_object",
-                            "description": "Scale an object by a factor",
-                            "key_params": ["object_name", "scale_factor"],
+                            "description": "Scale an object by a factor (parametric Part::Scale)",
+                            "key_params": ["object_name", "scale", "parametric"],
                         },
                         {
                             "name": "rotate_object",
@@ -896,7 +906,7 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "create_sketch",
-                            "description": "Create sketch on plane or face",
+                            "description": "Create sketch on an origin plane, datum plane or face",
                             "key_params": ["body_name", "plane"],
                         },
                         {
@@ -1321,10 +1331,17 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         {
                             "name": "get_screenshot",
                             "description": (
-                                "Capture a 3D view screenshot (GUI only); "
-                                "successful responses contain base64-encoded PNG in data"
+                                "Capture a 3D view screenshot (GUI only); returns a "
+                                "PNG image block plus JSON details (size, camera). "
+                                'view_angle="Current" keeps the current camera'
                             ),
-                            "key_params": ["view_angle", "width", "height", "doc_name"],
+                            "key_params": [
+                                "view_angle",
+                                "width",
+                                "height",
+                                "doc_name",
+                                "fit",
+                            ],
                         },
                         {
                             "name": "set_view_angle",
@@ -1338,18 +1355,27 @@ Check with: sketch.DoF gives the DoF count (0 = fully constrained).""",
                         },
                         {
                             "name": "zoom_in",
-                            "description": "Zoom in",
-                            "key_params": ["factor"],
+                            "description": "Zoom in the document's 3D view",
+                            "key_params": ["factor", "doc_name"],
                         },
                         {
                             "name": "zoom_out",
-                            "description": "Zoom out",
-                            "key_params": ["factor"],
+                            "description": "Zoom out the document's 3D view",
+                            "key_params": ["factor", "doc_name"],
                         },
                         {
                             "name": "set_camera_position",
-                            "description": "Set exact camera position and orientation",
-                            "key_params": ["position", "direction", "up_vector"],
+                            "description": (
+                                "Place the camera and look at a point; frame a "
+                                "region with view_height"
+                            ),
+                            "key_params": [
+                                "position",
+                                "look_at",
+                                "up_vector",
+                                "view_height",
+                                "doc_name",
+                            ],
                         },
                         {
                             "name": "set_object_visibility",

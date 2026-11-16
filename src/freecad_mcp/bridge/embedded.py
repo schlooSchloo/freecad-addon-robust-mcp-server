@@ -38,9 +38,20 @@ from freecad_mcp.bridge.console import (
     ConsoleHistoryUnavailableError,
     validate_console_lines,
 )
+from freecad_mcp.bridge.object_editing import (
+    build_delete_object_code,
+    build_edit_object_code,
+    delete_result_from_execution,
+    edit_result_from_execution,
+)
 from freecad_mcp.bridge.object_inspection import build_object_inspection_code
 from freecad_mcp.bridge.private_scratch import private_scratch_directory
-from freecad_mcp.bridge.screenshot import build_screenshot_code
+from freecad_mcp.bridge.screenshot import (
+    build_screenshot_code,
+    build_set_view_code,
+    execution_error_message,
+    screenshot_result,
+)
 
 
 class EmbeddedBridge(FreecadBridge):
@@ -352,6 +363,7 @@ else:
         *,
         include_properties: bool = True,
         include_shape: bool = True,
+        property_names: list[str] | None = None,
     ) -> ObjectInfo:
         """Get detailed object information."""
         result = await self.execute_python(
@@ -360,6 +372,7 @@ else:
                 doc_name,
                 include_properties=include_properties,
                 include_shape=include_shape,
+                property_names=property_names,
             )
         )
 
@@ -713,70 +726,28 @@ _result_ = {{
         Raises:
             ValueError: If object not found.
         """
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-obj = doc.getObject({obj_name!r})
-if obj is None:
-    raise ValueError("Object not found: " + repr({obj_name!r}))
-
-# Set properties
-for prop_name, prop_val in {properties!r}.items():
-    if hasattr(obj, prop_name):
-        setattr(obj, prop_name, prop_val)
-
-doc.recompute()
-
-_result_ = {{
-    "name": obj.Name,
-    "label": obj.Label,
-    "type_id": obj.TypeId,
-    "visibility": obj.ViewObject.Visibility if hasattr(obj, "ViewObject") and obj.ViewObject else True,
-    "children": [c.Name for c in obj.OutList] if hasattr(obj, "OutList") else [],
-    "parents": [p.Name for p in obj.InList] if hasattr(obj, "InList") else [],
-}}
-"""
-        result = await self.execute_python(code)
-
-        if result.success and result.result:
-            return ObjectInfo(**result.result)
-
-        error_msg = result.error_traceback or "Failed to edit object"
-        raise ValueError(error_msg)
+        code = build_edit_object_code(obj_name, properties, doc_name)
+        return edit_result_from_execution(await self.execute_python(code))
 
     async def delete_object(
         self,
         obj_name: str,
         doc_name: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Delete an object.
 
         Args:
             obj_name: Name of the object to delete.
             doc_name: Document name (uses active if None).
 
+        Returns:
+            Delete report (see ``delete_result_from_execution``).
+
         Raises:
             ValueError: If object not found.
         """
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-obj = doc.getObject({obj_name!r})
-if obj is None:
-    raise ValueError("Object not found: " + repr({obj_name!r}))
-
-doc.removeObject({obj_name!r})
-_result_ = True
-"""
-        result = await self.execute_python(code)
-
-        if not result.success:
-            error_msg = result.error_traceback or "Failed to delete object"
-            raise ValueError(error_msg)
+        code = build_delete_object_code(obj_name, doc_name)
+        return delete_result_from_execution(await self.execute_python(code))
 
     # =========================================================================
     # View and Screenshot
@@ -788,8 +759,9 @@ _result_ = True
         width: int = 800,
         height: int = 600,
         doc_name: str | None = None,
+        fit: bool = True,
     ) -> ScreenshotResult:
-        """Capture a screenshot of the 3D view.
+        """Capture a screenshot of the document's 3D view.
 
         Note: In embedded headless mode, screenshots are typically not available.
 
@@ -798,6 +770,7 @@ _result_ = True
             width: Image width in pixels.
             height: Image height in pixels.
             doc_name: Document name (uses active if None).
+            fit: Whether to fit all objects in the view before capture.
 
         Returns:
             ScreenshotResult with image data or error.
@@ -812,78 +785,38 @@ _result_ = True
                 width=width,
                 height=height,
                 view_angle=view_angle,
+                fit=fit,
             )
 
         # If GUI is available, attempt screenshot
         view_angle_str = view_angle.value if view_angle else "Isometric"
-        code = build_screenshot_code(doc_name, view_angle_str, width, height)
+        code = build_screenshot_code(doc_name, view_angle_str, width, height, fit)
         result = await self.execute_python(code)
-
-        if result.success and result.result:
-            return ScreenshotResult(
-                success=True,
-                data=result.result["data"],
-                format=result.result["format"],
-                width=result.result["width"],
-                height=result.result["height"],
-                view_angle=view_angle,
-            )
-
-        return ScreenshotResult(
-            success=False,
-            error=result.error_traceback or "Failed to capture screenshot",
-            width=width,
-            height=height,
-            view_angle=view_angle,
-        )
+        return screenshot_result(result, view_angle, width, height, fit)
 
     async def set_view(
         self,
         view_angle: ViewAngle,
         doc_name: str | None = None,
     ) -> None:
-        """Set the 3D view angle.
+        """Set the 3D view angle of the document's 3D view.
 
         Args:
             view_angle: View angle to set.
             doc_name: Document name (uses active if None).
+
+        Raises:
+            ValueError: The document or its 3D view does not exist.
         """
         gui_available = await self.is_gui_available()
 
         if not gui_available:
             return  # Silently ignore in headless mode
 
-        view_angle_str = view_angle.value
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-view = FreeCADGui.ActiveDocument.ActiveView
-if view is None:
-    raise ValueError("No active view")
-
-view_type = {view_angle_str!r}
-if view_type == "FitAll":
-    view.fitAll()
-elif view_type == "Isometric":
-    view.viewIsometric()
-elif view_type == "Front":
-    view.viewFront()
-elif view_type == "Back":
-    view.viewRear()
-elif view_type == "Top":
-    view.viewTop()
-elif view_type == "Bottom":
-    view.viewBottom()
-elif view_type == "Left":
-    view.viewLeft()
-elif view_type == "Right":
-    view.viewRight()
-
-_result_ = True
-"""
-        await self.execute_python(code)
+        code = build_set_view_code(doc_name, view_angle.value)
+        result = await self.execute_python(code)
+        if not result.success:
+            raise ValueError(execution_error_message(result, "Failed to set the view"))
 
     # =========================================================================
     # Macros

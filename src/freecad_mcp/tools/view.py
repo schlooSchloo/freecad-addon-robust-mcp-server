@@ -8,7 +8,19 @@ has excellent screenshot handling with view type detection.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mcp.types import ImageContent, TextContent
+
+from freecad_mcp.bridge.base import ViewAngle
 from freecad_mcp.tools._registration import file_tool
+from freecad_mcp.tools.view_camera import (
+    build_camera_code,
+    check_image_size,
+    positive_number,
+    run_camera_code,
+    screenshot_angle,
+    screenshot_content,
+    vector,
+)
 
 
 def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
@@ -25,10 +37,13 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         width: int = 800,
         height: int = 600,
         doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Capture a screenshot of the FreeCAD 3D view.
+        fit: bool | None = None,
+    ) -> list[ImageContent | TextContent]:
+        """Capture a screenshot of a document's 3D view.
 
-        Requires GUI mode - will return an error in headless mode.
+        Requires GUI mode. The document's 3D view is captured even when one
+        of its other views (a spreadsheet, say) is active. Named angles
+        change the camera only for the capture: it is put back afterwards.
 
         Args:
             view_angle: View angle to set before capture. Options:
@@ -39,56 +54,41 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
                 - "Bottom" - Bottom view
                 - "Left" - Left view (YZ plane)
                 - "Right" - Right view
-                - "FitAll" - Fit all objects in view
-            width: Image width in pixels. Defaults to 800.
-            height: Image height in pixels. Defaults to 600.
+                - "FitAll" - Keep the current orientation, fit all objects
+                - "Current" - Keep the current camera as it is, e.g. after
+                  set_camera_position or zoom_in
+            width: Image width in pixels (1-8192). Defaults to 800.
+            height: Image height in pixels (1-8192). Defaults to 600.
             doc_name: Document to capture. Uses active document if None.
+            fit: Whether to fit all objects in the view before capture.
+                Defaults to True for every angle except "Current".
 
         Returns:
-            Dictionary with screenshot result:
-                - success: Whether capture was successful
-                - data: Base64-encoded PNG image data (if success)
-                - format: Image format ("png")
-                - width: Actual image width
-                - height: Actual image height
-                - error: Error message (if not success)
+            Two content blocks: the PNG image, then a text block with the
+            capture details as JSON: success, format, width, height,
+            doc_name, view_angle, fit, camera (type, position,
+            view_direction, up_direction, look_at, focal_distance, and
+            view_height or field_of_view_degrees) and, when the document's
+            active view was not a 3D view, note.
+
+        Raises:
+            ValueError: Invalid arguments, no such document, no 3D view, no
+                GUI, or the capture failed. The client sees the message as
+                a tool error.
         """
-        from freecad_mcp.bridge.base import ViewAngle
-
-        # Map string to ViewAngle enum
-        angle_map = {
-            "Isometric": ViewAngle.ISOMETRIC,
-            "Front": ViewAngle.FRONT,
-            "Back": ViewAngle.BACK,
-            "Top": ViewAngle.TOP,
-            "Bottom": ViewAngle.BOTTOM,
-            "Left": ViewAngle.LEFT,
-            "Right": ViewAngle.RIGHT,
-            "FitAll": ViewAngle.FIT_ALL,
-        }
-
-        if view_angle not in angle_map:
-            return {
-                "success": False,
-                "error": f"Invalid view_angle: {view_angle}. Options: {list(angle_map.keys())}",
-            }
+        angle = screenshot_angle(view_angle)
+        check_image_size(width, height)
+        fit_view = (angle is not ViewAngle.CURRENT) if fit is None else fit
 
         bridge = await get_bridge()
         result = await bridge.get_screenshot(
-            view_angle=angle_map[view_angle],
+            view_angle=angle,
             width=width,
             height=height,
             doc_name=doc_name,
+            fit=fit_view,
         )
-
-        return {
-            "success": result.success,
-            "data": result.data,
-            "format": result.format,
-            "width": result.width,
-            "height": result.height,
-            "error": result.error,
-        }
+        return screenshot_content(result)
 
     @mcp.tool()
     async def set_view_angle(
@@ -348,153 +348,128 @@ else:
     async def zoom_in(
         factor: float = 1.5, doc_name: str | None = None
     ) -> dict[str, Any]:
-        """Zoom in the 3D view.
+        """Zoom in the 3D view of a document.
 
-        Requires GUI mode.
+        Requires GUI mode. Orthographic views show an area ``factor`` times
+        smaller; perspective views move the camera ``factor`` times closer to
+        the point it looks at. Use get_screenshot with view_angle="Current"
+        to capture the result.
 
         Args:
-            factor: Zoom factor (>1 zooms in). Defaults to 1.5.
-            doc_name: Document to zoom in. Uses active document if None.
+            factor: Zoom factor (>1 zooms in, <1 zooms out). Defaults to 1.5.
+            doc_name: Document whose 3D view to zoom. Uses active document if
+                None.
 
         Returns:
             Dictionary with result:
-                - success: Whether operation was successful
-        """
-        bridge = await get_bridge()
+                - success: True
+                - doc_name: Document whose view was changed
+                - camera: The new camera (type, position, view_direction,
+                  up_direction, look_at, focal_distance, and view_height or
+                  field_of_view_degrees)
+                - note: Present when the document's active view was not a 3D
+                  view and its 3D view was used
 
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - zoom requires GUI mode"}}
-else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        _result_ = {{"success": False, "error": "No document found"}}
-    elif FreeCADGui.ActiveDocument is None or FreeCADGui.ActiveDocument.ActiveView is None:
-        _result_ = {{"success": False, "error": "No active view"}}
-    else:
-        view = FreeCADGui.ActiveDocument.ActiveView
-        cam = view.getCameraNode()
-        if hasattr(cam, "scaleHeight"):
-            # For orthographic views
-            cam.scaleHeight(1.0 / {factor})
-        else:
-            # For perspective views - move camera closer
-            view.zoomIn()
-        _result_ = {{"success": True}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Zoom in failed",
-        }
+        Raises:
+            ValueError: Invalid factor, no such document or 3D view, or no
+                GUI.
+        """
+        zoom = positive_number("factor", factor)
+        bridge = await get_bridge()
+        code = build_camera_code(doc_name, f"zoom_camera_text(camera, {zoom!r})")
+        return await run_camera_code(bridge, code, "Zoom in")
 
     @mcp.tool()
     async def zoom_out(
         factor: float = 1.5, doc_name: str | None = None
     ) -> dict[str, Any]:
-        """Zoom out the 3D view.
+        """Zoom out the 3D view of a document.
 
-        Requires GUI mode.
+        Requires GUI mode. The opposite of zoom_in with the same factor.
 
         Args:
-            factor: Zoom factor (>1 zooms out). Defaults to 1.5.
-            doc_name: Document to zoom out. Uses active document if None.
+            factor: Zoom factor (>1 zooms out, <1 zooms in). Defaults to 1.5.
+            doc_name: Document whose 3D view to zoom. Uses active document if
+                None.
 
         Returns:
             Dictionary with result:
-                - success: Whether operation was successful
-        """
-        bridge = await get_bridge()
+                - success: True
+                - doc_name: Document whose view was changed
+                - camera: The new camera (see zoom_in)
+                - note: Present when the document's active view was not a 3D
+                  view and its 3D view was used
 
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - zoom requires GUI mode"}}
-else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        _result_ = {{"success": False, "error": "No document found"}}
-    elif FreeCADGui.ActiveDocument is None or FreeCADGui.ActiveDocument.ActiveView is None:
-        _result_ = {{"success": False, "error": "No active view"}}
-    else:
-        view = FreeCADGui.ActiveDocument.ActiveView
-        cam = view.getCameraNode()
-        if hasattr(cam, "scaleHeight"):
-            # For orthographic views
-            cam.scaleHeight({factor})
-        else:
-            # For perspective views - move camera farther
-            view.zoomOut()
-        _result_ = {{"success": True}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Zoom out failed",
-        }
+        Raises:
+            ValueError: Invalid factor, no such document or 3D view, or no
+                GUI.
+        """
+        zoom = 1.0 / positive_number("factor", factor)
+        bridge = await get_bridge()
+        code = build_camera_code(doc_name, f"zoom_camera_text(camera, {zoom!r})")
+        return await run_camera_code(bridge, code, "Zoom out")
 
     @mcp.tool()
     async def set_camera_position(
         position: list[float],
         look_at: list[float] | None = None,
         doc_name: str | None = None,
+        up_vector: list[float] | None = None,
+        view_height: float | None = None,
     ) -> dict[str, Any]:
-        """Set the camera position and orientation.
+        """Place the camera of a document's 3D view and point it at a point.
 
-        Requires GUI mode.
+        Requires GUI mode. To frame a region, look at its centre from a
+        point outside it and, for orthographic views, set view_height to a
+        little more than the region's size. Capture the result with
+        get_screenshot(view_angle="Current").
 
         Args:
-            position: Camera position as [x, y, z].
-            look_at: Point to look at as [x, y, z]. Uses origin if None.
-            doc_name: Document to set camera for. Uses active document if None.
+            position: Camera position as [x, y, z] in mm.
+            look_at: Point to look at as [x, y, z]. Uses origin if None. It
+                becomes the focal point, which zoom_in and zoom_out keep in
+                place.
+            doc_name: Document whose 3D view to change. Uses active document
+                if None.
+            up_vector: Direction that should appear upwards in the image, as
+                [x, y, z]. Defaults to +Z (or +Y when looking straight up or
+                down). Must not be parallel to the viewing direction.
+            view_height: Height of the visible area in mm, for orthographic
+                views (FreeCAD's default). Ignored by perspective views,
+                where the distance to look_at sets the visible size. Keeps
+                the current height if None.
 
         Returns:
             Dictionary with result:
-                - success: Whether operation was successful
+                - success: True
+                - doc_name: Document whose view was changed
+                - camera: The new camera (type, position, view_direction,
+                  up_direction, look_at, focal_distance, and view_height or
+                  field_of_view_degrees)
+                - note: Present when the document's active view was not a 3D
+                  view and its 3D view was used
+
+        Raises:
+            ValueError: Invalid vectors (position equal to look_at, up_vector
+                parallel to the view), no such document or 3D view, or no
+                GUI.
         """
-        bridge = await get_bridge()
-
-        look_str = (
-            f"FreeCAD.Vector({look_at[0]}, {look_at[1]}, {look_at[2]})"
-            if look_at
-            else "FreeCAD.Vector(0, 0, 0)"
+        camera_position = vector("position", position)
+        target = vector("look_at", look_at) or (0.0, 0.0, 0.0)
+        up = vector("up_vector", up_vector)
+        height = (
+            None if view_height is None else positive_number("view_height", view_height)
         )
+        if camera_position == target:
+            raise ValueError("position and look_at must be different points")
 
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - camera position requires GUI mode"}}
-else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        _result_ = {{"success": False, "error": "No document found"}}
-    elif FreeCADGui.ActiveDocument is None or FreeCADGui.ActiveDocument.ActiveView is None:
-        _result_ = {{"success": False, "error": "No active view"}}
-    else:
-        view = FreeCADGui.ActiveDocument.ActiveView
-        pos = FreeCAD.Vector({position[0]}, {position[1]}, {position[2]})
-        look_at = {look_str}
-
-        # Calculate direction
-        direction = look_at - pos
-        direction.normalize()
-
-        # Set camera
-        view.setCameraOrientation(FreeCAD.Rotation(FreeCAD.Vector(0, 0, -1), direction))
-        cam = view.getCameraNode()
-        cam.position.setValue(pos.x, pos.y, pos.z)
-
-        _result_ = {{"success": True}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Set camera position failed",
-        }
+        bridge = await get_bridge()
+        code = build_camera_code(
+            doc_name,
+            f"look_at_camera_text(camera, {camera_position!r}, {target!r},"
+            f" {up!r}, {height!r})",
+        )
+        return await run_camera_code(bridge, code, "Set camera position")
 
     @mcp.tool()
     async def undo(doc_name: str | None = None) -> dict[str, Any]:
@@ -764,17 +739,35 @@ except Exception:
     async def recompute(doc_name: str | None = None) -> dict[str, Any]:
         """Force recompute of all objects in a document.
 
+        Every object is marked as changed and the document is recomputed.
+        Afterwards, every object FreeCAD marks as failed is listed with
+        FreeCAD's own error message, and success is False if any failed.
+
         Args:
             doc_name: Document to recompute. Uses active document if None.
 
         Returns:
             Dictionary with result:
-                - success: Whether recompute completed
-                - touch_count: Number of objects that were recomputed
+                - success: False if any object failed to recompute
+                - touch_count: Number of objects marked for recompute
+                - invalid_objects: Failed objects (up to 50), each with
+                  document, name, label, type_id, state, message (FreeCAD's
+                  own error text), dependents (objects built on it, whose
+                  results may be out of date) and, for broken links,
+                  link_problems naming the missing file, document or object
+                - invalid_objects_truncated: True if more objects failed
+                  than are listed
+                - error: Summary naming the failed objects and their
+                  messages, or None on success
         """
+        # Imported here to keep this fork's change inside this function.
+        from freecad_mcp.bridge.object_health import OBJECT_HEALTH_HELPERS
+
         bridge = await get_bridge()
 
-        code = f"""
+        code = (
+            OBJECT_HEALTH_HELPERS
+            + f"""
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     _result_ = {{"success": False, "error": "No document found", "touch_count": 0}}
@@ -788,8 +781,10 @@ else:
 
     doc.recompute()
 
-    _result_ = {{"success": True, "touch_count": touch_count}}
+    _result_ = _mcp_recompute_report(FreeCAD.getDependentObjects(doc.Objects))
+    _result_["touch_count"] = touch_count
 """
+        )
         result = await bridge.execute_python(code)
         if result.success and result.result:
             return result.result
