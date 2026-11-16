@@ -41,10 +41,12 @@ from freecad_mcp.tools.custom.loader import _PendingTool, _stage_module
 
 # Arguments for tools that validate a value before building any code.
 ARGUMENT_OVERRIDES: dict[str, dict[str, Any]] = {
+    "add_sketch_polyline": {"points": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]},
     "boolean_operation": {"operation": "fuse"},
     # Job-defined output paths can't be reviewed, so the tool refuses them.
     "cam_post_process": {"use_job_output": False},
     "draft_text_on_surface": {"position": [0.0, 0.0]},
+    "move_sketch_point": {"position": [1.0, 1.0]},
     "set_camera_position": {
         "position": [10.0, 0.0, 0.0],
         "look_at": [0.0, 0.0, 0.0],

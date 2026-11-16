@@ -29,4 +29,9 @@ CUSTOM_TOOL_MODULES: tuple[ToolModule, ...] = (
         "freecad_mcp.tools.custom.status",
         "register_status_tools",
     ),
+    ToolModule(
+        "custom.sketch_editing",
+        "freecad_mcp.tools.custom.sketch_editing",
+        "register_sketch_editing_tools",
+    ),
 )
